@@ -29,6 +29,7 @@ const giftCardRoutes        = require('./routes/giftCards');
 const creditCardRoutes      = require('./routes/creditCards');
 const itemRoutes            = require('./routes/items');
 const saleInvoiceRoutes     = require('./routes/saleInvoices');
+const purchaseInvoiceRoutes = require('./routes/purchaseInvoices');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -63,6 +64,7 @@ app.use('/api/gift-cards',        giftCardRoutes);
 app.use('/api/credit-cards',      creditCardRoutes);
 app.use('/api/items',             itemRoutes);
 app.use('/api/sale-invoices',     saleInvoiceRoutes);
+app.use('/api/purchase-invoices', purchaseInvoiceRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

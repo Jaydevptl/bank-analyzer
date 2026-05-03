@@ -29,6 +29,7 @@ import CreditCardsPage    from './components/CashBank/CreditCardsPage';
 import PartiesPage        from './components/Parties/PartiesPage';
 import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
+import PurchaseInvoicesPage from './components/Purchase/PurchaseInvoicesPage';
 import DevToolsPage       from './components/Settings/DevToolsPage';
 
 // ─── Sidebar definition ──────────────────────────────────────────────────────
@@ -138,6 +139,8 @@ const VIEW_REGISTRY = {
   'items':   () => <ItemsPage />,
 
   'sale/invoices': () => <SaleInvoicesPage />,
+
+  'purchase/bills': () => <PurchaseInvoicesPage />,
 
   'bank-statement/upload':           () => <FileUpload />,
   'bank-statement/transactions':     () => <MainTable />,

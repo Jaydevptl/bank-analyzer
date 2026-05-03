@@ -235,6 +235,20 @@ export const finoRecordPayment     = (id, data) => api.post(`/sale-invoices/${id
 export const finoDeletePayment     = (pid, reason) => api.delete(`/sale-invoices/payments/${pid}`, { data: { reason } });
 export const finoCustomerOutstanding = (partyId) => api.get(`/sale-invoices/customer/${partyId}/outstanding`);
 
+// ─── Fino Phase 6: Purchase Bills ────────────────────────────────────────────
+
+export const finoListBills          = (params = {}) => api.get('/purchase-invoices', { params });
+export const finoGetBill            = (id) => api.get(`/purchase-invoices/${id}`);
+export const finoCreateBill         = (data) => api.post('/purchase-invoices', data);
+export const finoUpdateBill         = (id, data) => api.patch(`/purchase-invoices/${id}`, data);
+export const finoCancelBill         = (id, reason) => api.delete(`/purchase-invoices/${id}`, { data: { reason } });
+export const finoNextBillNumber     = () => api.get('/purchase-invoices/next-number');
+export const finoBillSummary        = () => api.get('/purchase-invoices/summary');
+export const finoBillPayments       = (id) => api.get(`/purchase-invoices/${id}/payments`);
+export const finoMakeBillPayment    = (id, data) => api.post(`/purchase-invoices/${id}/payments`, data);
+export const finoDeleteBillPayment  = (pid, reason) => api.delete(`/purchase-invoices/payments/${pid}`, { data: { reason } });
+export const finoSupplierPayable    = (partyId) => api.get(`/purchase-invoices/supplier/${partyId}/payable`);
+
 // ─── Fino Phase 3d: Credit Cards ──────────────────────────────────────────────
 
 export const finoListCC          = (params = {}) => api.get('/credit-cards', { params });
