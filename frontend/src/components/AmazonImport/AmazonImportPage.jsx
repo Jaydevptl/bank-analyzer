@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, X, Trash2, AlertCircle, Package, ShoppingCart, RefreshCw, ArrowRight } from 'lucide-react';
+import { Plus, X, Trash2, AlertCircle, Package, ShoppingCart, RefreshCw, ArrowRight, Check, Eye, Upload, Repeat } from 'lucide-react';
 import {
   finoAiDashboard,
   finoAiListHawala, finoAiCreateHawala, finoAiHawalaInrPaid, finoAiHawalaUsdReceived, finoAiCancelHawala, finoAiNextHawalaNumber,
@@ -176,7 +176,7 @@ function HawalaTab({ rows, onAct }) {
       <div style={{ marginBottom: 10 }}>
         <button className="btn btn-primary btn-sm" onClick={() => onAct({ kind: 'newHawala' })}><Plus size={13} /> New Hawala</button>
       </div>
-      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'visible' }}>
         {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No hawala transactions.</div>
         ) : (
@@ -196,38 +196,56 @@ function HawalaTab({ rows, onAct }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
-                <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 700 }}>{r.txn_number}</td>
-                  <td style={{ padding: '8px 10px' }}>{r.txn_date}</td>
-                  <td style={{ padding: '8px 10px' }}>{r.agent?.name || '—'}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtINR(r.inr_amount)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(r.usd_amount)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{Number(r.exchange_rate).toFixed(2)}</td>
-                  <td style={{ padding: '8px 10px' }}>
-                    {r.inr_paid_status === 'paid'
-                      ? <span style={{ color: '#22c55e' }}>✅ {r.inr_paid_date || ''}</span>
-                      : <button className="btn btn-ghost btn-xs" onClick={async () => { await finoAiHawalaInrPaid(r.id, { paidDate: today() }); window.location.reload(); }}>Mark Paid</button>}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    {r.usd_received_status === 'received'
-                      ? <span style={{ color: '#22c55e' }}>✅ {r.usd_received_date || ''}</span>
-                      : <button className="btn btn-ghost btn-xs" onClick={async () => { await finoAiHawalaUsdReceived(r.id, { receivedDate: today() }); window.location.reload(); }}>Mark Recv</button>}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
-                      background: r.status === 'completed' ? 'rgba(34,197,94,0.15)' : r.status === 'cancelled' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
-                      color: r.status === 'completed' ? '#22c55e' : r.status === 'cancelled' ? '#ef4444' : '#f59e0b',
-                    }}>{r.status}</span>
-                  </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <RowMenu items={[{
-                      label: 'Cancel', icon: <Trash2 size={12} />, danger: true,
-                      onClick: () => onAct({ kind: 'deleteHawala', row: r }),
-                    }]} />
-                  </td>
-                </tr>
-              ))}
+              {rows.map(r => {
+                const inrPaid = r.inr_paid_status === 'paid';
+                const usdRecv = r.usd_received_status === 'received';
+                const cancelled = r.status === 'cancelled';
+                return (
+                  <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 700 }}>{r.txn_number}</td>
+                    <td style={{ padding: '8px 10px' }}>{r.txn_date}</td>
+                    <td style={{ padding: '8px 10px' }}>{r.agent?.name || '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtINR(r.inr_amount)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(r.usd_amount)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{Number(r.exchange_rate).toFixed(2)}</td>
+                    <td style={{ padding: '8px 10px' }}>
+                      {inrPaid
+                        ? <span style={{ color: '#22c55e' }}>✅ {r.inr_paid_date || ''}</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>Pending</span>}
+                    </td>
+                    <td style={{ padding: '8px 10px' }}>
+                      {usdRecv
+                        ? <span style={{ color: '#22c55e' }}>✅ {r.usd_received_date || ''}</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>Pending</span>}
+                    </td>
+                    <td style={{ padding: '8px 10px' }}>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
+                        background: r.status === 'completed' ? 'rgba(34,197,94,0.15)' : r.status === 'cancelled' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                        color: r.status === 'completed' ? '#22c55e' : r.status === 'cancelled' ? '#ef4444' : '#f59e0b',
+                      }}>{r.status}</span>
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                      <RowMenu items={[
+                        {
+                          label: 'Mark INR Paid', icon: <Check size={12} />,
+                          disabled: inrPaid || cancelled,
+                          onClick: async () => { await finoAiHawalaInrPaid(r.id, { paidDate: today() }); window.location.reload(); },
+                        },
+                        {
+                          label: 'Mark USD Received', icon: <Check size={12} />,
+                          disabled: usdRecv || cancelled,
+                          onClick: async () => { await finoAiHawalaUsdReceived(r.id, { receivedDate: today() }); window.location.reload(); },
+                        },
+                        {
+                          label: 'Cancel', icon: <Trash2 size={12} />, danger: true,
+                          disabled: cancelled,
+                          onClick: () => onAct({ kind: 'deleteHawala', row: r }),
+                        },
+                      ]} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -242,7 +260,7 @@ function CardsTab({ rows, onAct }) {
       <div style={{ marginBottom: 10 }}>
         <button className="btn btn-primary btn-sm" onClick={() => onAct({ kind: 'newCard' })}><Plus size={13} /> New Card</button>
       </div>
-      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'visible' }}>
         {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No cards.</div>
         ) : (
@@ -256,28 +274,34 @@ function CardsTab({ rows, onAct }) {
                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Used</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Balance</th>
                 <th style={{ padding: '8px 10px' }}>Status</th>
-                <th style={{ padding: '8px 10px', width: 200 }}></th>
+                <th style={{ padding: '8px 10px', width: 32 }}></th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(c => (
-                <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 700 }}>{c.card_label}</td>
-                  <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{c.email || '—'}</td>
-                  <td style={{ padding: '8px 10px' }}>{c.expiry_date || '—'}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(c.total_loaded)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(c.total_used)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: Number(c.current_balance_usd) > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
-                    {fmtUSD(c.current_balance_usd)}
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>{c.status}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <button className="btn btn-ghost btn-xs" onClick={() => onAct({ kind: 'loadCard', row: c })}>Load</button>
-                    <button className="btn btn-ghost btn-xs" onClick={() => onAct({ kind: 'transferCard', row: c })}>Transfer</button>
-                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--danger)' }} onClick={() => onAct({ kind: 'deleteCard', row: c })}><Trash2 size={11} /></button>
-                  </td>
-                </tr>
-              ))}
+              {rows.map(c => {
+                const closed = c.status === 'closed' || c.is_deleted;
+                const noBalance = !(Number(c.current_balance_usd) > 0);
+                return (
+                  <tr key={c.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 700 }}>{c.card_label}</td>
+                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{c.email || '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{c.expiry_date || '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(c.total_loaded)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtUSD(c.total_used)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: Number(c.current_balance_usd) > 0 ? 'var(--success)' : 'var(--text-muted)' }}>
+                      {fmtUSD(c.current_balance_usd)}
+                    </td>
+                    <td style={{ padding: '8px 10px' }}>{c.status}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                      <RowMenu items={[
+                        { label: 'Load', icon: <Upload size={12} />, disabled: closed, onClick: () => onAct({ kind: 'loadCard', row: c }) },
+                        { label: 'Transfer', icon: <Repeat size={12} />, disabled: closed || noBalance, onClick: () => onAct({ kind: 'transferCard', row: c }) },
+                        { label: 'Delete', icon: <Trash2 size={12} />, danger: true, onClick: () => onAct({ kind: 'deleteCard', row: c }) },
+                      ]} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -292,7 +316,7 @@ function OrdersTab({ rows, onAct }) {
       <div style={{ marginBottom: 10 }}>
         <button className="btn btn-primary btn-sm" onClick={() => onAct({ kind: 'newOrder' })}><Plus size={13} /> New Order</button>
       </div>
-      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'visible' }}>
         {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No orders.</div>
         ) : (
@@ -347,7 +371,7 @@ function ShipmentsTab({ rows, onAct }) {
       <div style={{ marginBottom: 10 }}>
         <button className="btn btn-primary btn-sm" onClick={() => onAct({ kind: 'newShipment' })}><Plus size={13} /> New Shipment</button>
       </div>
-      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--bg-surface)', borderRadius: 12, border: '1px solid var(--border)', overflow: 'visible' }}>
         {rows.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>No shipments.</div>
         ) : (
@@ -363,7 +387,7 @@ function ShipmentsTab({ rows, onAct }) {
                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Cost/g (A)</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right' }}>Total Cost</th>
                 <th style={{ padding: '8px 10px' }}>Status</th>
-                <th style={{ padding: '8px 10px', width: 200 }}></th>
+                <th style={{ padding: '8px 10px', width: 32 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -379,8 +403,10 @@ function ShipmentsTab({ rows, onAct }) {
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>{fmtINR(s.total_landed_cost_inr || s.shipping_cost_inr)}</td>
                   <td style={{ padding: '8px 10px' }}>{s.received_status}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <button className="btn btn-ghost btn-xs" onClick={() => onAct({ kind: 'shipDetail', row: s })}>Detail</button>
-                    <button className="btn btn-ghost btn-xs" style={{ color: 'var(--danger)' }} onClick={() => onAct({ kind: 'deleteShipment', row: s })}><Trash2 size={11} /></button>
+                    <RowMenu items={[
+                      { label: 'View Detail', icon: <Eye size={12} />, onClick: () => onAct({ kind: 'shipDetail', row: s }) },
+                      { label: 'Cancel', icon: <Trash2 size={12} />, danger: true, onClick: () => onAct({ kind: 'deleteShipment', row: s }) },
+                    ]} />
                   </td>
                 </tr>
               ))}
