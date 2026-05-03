@@ -359,7 +359,7 @@ async function recordSell({
   const gross   = round2(qty * pr);
   const net     = round2(gross - charges);                    // bank receives
   const cost    = round2(qty * Number(holding.avg_buy_price)); // cost basis
-  const realized = round2(net - cost);                         // P&L (after charges)
+  const realized = round2(gross - cost);                       // P&L vs cost basis (charges booked separately as expense)
 
   const { data: account } = await supabase
     .from('fino_broker_accounts').select('*').eq('id', brokerAccountId).maybeSingle();
