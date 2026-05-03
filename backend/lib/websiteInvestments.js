@@ -147,8 +147,25 @@ async function recordTransaction({
   const w = await getWebsite(websiteId);
   if (!w) throw new Error('Website not found');
 
-  const bankCode = await _accountCoaCode(paidViaAccountId);
-  if (!bankCode) throw new Error('paidViaAccountId does not resolve to a COA');
+  // Frontend may send a fino_bank_accounts.id OR a fino_chart_of_accounts.id.
+  // The DB FK on paid_via_account_id points to fino_chart_of_accounts(id), so
+  // resolve to the COA id before insert.
+  let coaAccountId = paidViaAccountId;
+  let coaCode = null;
+  const { data: ba } = await supabase
+    .from('fino_bank_accounts').select('id, linked_account_id').eq('id', paidViaAccountId).maybeSingle();
+  if (ba?.linked_account_id) {
+    coaAccountId = ba.linked_account_id;
+    const { data: c } = await supabase
+      .from('fino_chart_of_accounts').select('code').eq('id', coaAccountId).maybeSingle();
+    coaCode = c?.code || null;
+  } else {
+    const { data: c } = await supabase
+      .from('fino_chart_of_accounts').select('code').eq('id', paidViaAccountId).maybeSingle();
+    coaCode = c?.code || null;
+  }
+  if (!coaCode) throw new Error('paidViaAccountId does not resolve to a COA');
+  const bankCode = coaCode;
 
   // Determine ledger flow
   const expenseTypes = ['ad_spend', 'hosting', 'domain', 'development', 'marketing', 'other_expense'];
@@ -176,7 +193,7 @@ async function recordTransaction({
     throw new Error(`Unknown txnType: ${txnType}`);
   }
 
-  // Insert row first
+  // Insert row first (use COA id to satisfy the FK)
   const { data: row, error: insErr } = await supabase
     .from('fino_website_transactions').insert({
       website_id: websiteId,
@@ -184,7 +201,7 @@ async function recordTransaction({
       txn_type: txnType,
       description: description?.trim() || null,
       amount: amt,
-      paid_via_account_id: paidViaAccountId,
+      paid_via_account_id: coaAccountId,
       notes: notes?.trim() || null,
     }).select().single();
   if (insErr) throw insErr;
@@ -203,10 +220,18 @@ async function recordTransaction({
     .update({ ledger_txn_group_id: ledger.txn_group_id })
     .eq('id', row.id);
 
-  // Refresh bank balance
-  const { data: ba } = await supabase
-    .from('fino_bank_accounts').select('id').eq('id', paidViaAccountId).maybeSingle();
-  if (ba?.id) { try { await refreshCurrentBalance(ba.id); } catch (_) {} }
+  // Refresh bank balance — try by direct id first, then by linked_account_id
+  try {
+    const { data: baDirect } = await supabase
+      .from('fino_bank_accounts').select('id').eq('id', paidViaAccountId).maybeSingle();
+    if (baDirect?.id) {
+      await refreshCurrentBalance(baDirect.id);
+    } else {
+      const { data: baLinked } = await supabase
+        .from('fino_bank_accounts').select('id').eq('linked_account_id', coaAccountId).maybeSingle();
+      if (baLinked?.id) await refreshCurrentBalance(baLinked.id);
+    }
+  } catch (_) {}
 
   return { transaction: row, ledger };
 }
@@ -240,7 +265,12 @@ async function deleteTransaction(id, reason = null) {
   await supabase.from('fino_website_transactions').update({ is_deleted: true }).eq('id', id);
 
   if (row.paid_via_account_id) {
-    try { await refreshCurrentBalance(row.paid_via_account_id); } catch (_) {}
+    try {
+      // row.paid_via_account_id is a COA id; find the bank that links to it
+      const { data: ba } = await supabase
+        .from('fino_bank_accounts').select('id').eq('linked_account_id', row.paid_via_account_id).maybeSingle();
+      if (ba?.id) await refreshCurrentBalance(ba.id);
+    } catch (_) {}
   }
   return { success: true };
 }
