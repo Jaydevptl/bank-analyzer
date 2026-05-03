@@ -27,6 +27,7 @@ import LoansGivenPage     from './components/CashBank/LoansGivenPage';
 import GiftCardsPage      from './components/CashBank/GiftCardsPage';
 import CreditCardsPage    from './components/CashBank/CreditCardsPage';
 import CashConversionsPage from './components/CashBank/CashConversionsPage';
+import StatementUploadPage from './components/BankStatement/StatementUploadPage';
 import PartiesPage        from './components/Parties/PartiesPage';
 import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
@@ -100,7 +101,8 @@ const NAV_GROUPS = [
   ]},
 
   { id: 'bank-statement', label: 'Bank Statement', Icon: RefreshCw, children: [
-    { id: 'bs-upload',           label: 'Upload',           view: 'bank-statement/upload' },
+    { id: 'bs-upload',           label: 'Upload (Legacy)',  view: 'bank-statement/upload' },
+    { id: 'bs-import',           label: 'Statement Import', view: 'bank-statement/import' },
     { id: 'bs-transactions',     label: 'Transactions',     view: 'bank-statement/transactions' },
     { id: 'bs-verified',         label: 'Verified',         view: 'bank-statement/verified' },
     { id: 'bs-duplicates',       label: 'Duplicates',       view: 'bank-statement/duplicates' },
@@ -145,6 +147,7 @@ const VIEW_REGISTRY = {
   'purchase/bills': () => <PurchaseInvoicesPage />,
 
   'bank-statement/upload':           () => <FileUpload />,
+  'bank-statement/import':           () => <StatementUploadPage />,
   'bank-statement/transactions':     () => <MainTable />,
   'bank-statement/verified':         () => <VerifiedTable />,
   'bank-statement/duplicates':       () => <DuplicatesTable />,

@@ -261,6 +261,16 @@ export const finoConversionSummary  = () => api.get('/cash-conversions/summary')
 export const finoMarkCashReceived   = (id, data) => api.post(`/cash-conversions/${id}/cash-received`, data);
 export const finoMarkGstReceived    = (id, data) => api.post(`/cash-conversions/${id}/gst-invoice-received`, data);
 
+// ─── Fino Phase 9: Statement Uploads ─────────────────────────────────────────
+
+export const finoListUploads        = (params = {}) => api.get('/statement-uploads', { params });
+export const finoGetUpload          = (id) => api.get(`/statement-uploads/${id}`);
+export const finoCreateUpload       = (data) => api.post('/statement-uploads', data);
+export const finoUpdateUploadedTxn  = (txnId, data) => api.patch(`/statement-uploads/transactions/${txnId}`, data);
+export const finoImportUploadTxns   = (id, transactionIds) => api.post(`/statement-uploads/${id}/import`, { transactionIds });
+export const finoSkipUploadTxns     = (id, transactionIds) => api.post(`/statement-uploads/${id}/skip`, { transactionIds });
+export const finoDeleteUpload       = (id, reason) => api.delete(`/statement-uploads/${id}`, { data: { reason } });
+
 // ─── Fino Phase 3d: Credit Cards ──────────────────────────────────────────────
 
 export const finoListCC          = (params = {}) => api.get('/credit-cards', { params });
