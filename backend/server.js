@@ -34,6 +34,13 @@ const cashConversionRoutes  = require('./routes/cashConversions');
 const statementUploadRoutes = require('./routes/statementUpload');
 const shareMarketRoutes     = require('./routes/shareMarket');
 const amazonImportRoutes    = require('./routes/amazonImport');
+const companyRoutes            = require('./routes/companies');
+const websiteInvestmentRoutes  = require('./routes/websiteInvestments');
+const partnershipRoutes        = require('./routes/partnerships');
+const intercompanyRoutes       = require('./routes/intercompany');
+const salaryRoutes             = require('./routes/salary');
+const tdsRoutes                = require('./routes/tds');
+const gstRoutes                = require('./routes/gst');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -73,6 +80,13 @@ app.use('/api/cash-conversions', cashConversionRoutes);
 app.use('/api/statement-uploads', statementUploadRoutes);
 app.use('/api/share-market',      shareMarketRoutes);
 app.use('/api/amazon-import',     amazonImportRoutes);
+app.use('/api/companies',         companyRoutes);
+app.use('/api/websites',          websiteInvestmentRoutes);
+app.use('/api/partnerships',      partnershipRoutes);
+app.use('/api/intercompany',      intercompanyRoutes);
+app.use('/api/salary',            salaryRoutes);
+app.use('/api/tds',               tdsRoutes);
+app.use('/api/gst',               gstRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

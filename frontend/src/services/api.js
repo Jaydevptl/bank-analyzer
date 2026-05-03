@@ -402,6 +402,79 @@ export const finoBorrowerSummary = () => api.get('/loans/summary/borrower-wise')
 export const finoListParties     = (params = {}) => api.get('/parties', { params });
 export const finoCreateParty     = (data) => api.post('/parties', data);
 
+// ─── Fino Phase 12: Website Investments ──────────────────────────────────────
+
+export const finoListWebsites      = (params = {}) => api.get('/websites', { params });
+export const finoCreateWebsite     = (data) => api.post('/websites', data);
+export const finoGetWebsite        = (id) => api.get(`/websites/${id}`);
+export const finoDeleteWebsite     = (id, reason) => api.delete(`/websites/${id}`, { data: { reason } });
+export const finoGetWebsiteSummary = (id, params = {}) => api.get(`/websites/${id}/summary`, { params });
+export const finoListWebsiteTxns   = (id, params = {}) => api.get(`/websites/${id}/transactions`, { params });
+export const finoCreateWebsiteTxn  = (id, data) => api.post(`/websites/${id}/transactions`, data);
+export const finoDeleteWebsiteTxn  = (txnId, reason) => api.delete(`/websites/transactions/${txnId}`, { data: { reason } });
+export const finoWebsiteDashboard  = () => api.get('/websites/dashboard');
+
+// ─── Fino Phase 13: Partnerships ─────────────────────────────────────────────
+
+export const finoListPartnerships   = (params = {}) => api.get('/partnerships', { params });
+export const finoCreatePartnership  = (data) => api.post('/partnerships', data);
+export const finoGetPartnership     = (id) => api.get(`/partnerships/${id}`);
+export const finoDeletePartnership  = (id, reason) => api.delete(`/partnerships/${id}`, { data: { reason } });
+export const finoAddMember          = (pid, data) => api.post(`/partnerships/${pid}/members`, data);
+export const finoRemoveMember       = (mid, reason) => api.delete(`/partnerships/members/${mid}`, { data: { reason } });
+export const finoCreateDistribution = (pid, data) => api.post(`/partnerships/${pid}/distribute`, data);
+export const finoGetDistribution    = (did) => api.get(`/partnerships/distributions/${did}`);
+export const finoPayDistribution    = (did, data) => api.post(`/partnerships/distributions/${did}/pay`, data);
+export const finoCancelDistribution = (did, reason) => api.delete(`/partnerships/distributions/${did}`, { data: { reason } });
+export const finoPartnersDashboard  = () => api.get('/partnerships/dashboard');
+
+// ─── Fino Phase 14: Loan Schedules ───────────────────────────────────────────
+
+export const finoLoanGenerateSchedule = (id, data) => api.post(`/loans/${id}/generate-schedule`, data);
+export const finoLoanGetSchedule      = (id) => api.get(`/loans/${id}/schedule`);
+export const finoLoanPayInstallment   = (sid, data) => api.post(`/loans/schedule/${sid}/pay`, data);
+export const finoLoansOverview        = () => api.get('/loans/summary/overview');
+
+// ─── Fino Phase 15: Inter-company + Owner Drawings ───────────────────────────
+
+export const finoIcDashboard         = () => api.get('/intercompany/dashboard');
+export const finoListTransfers       = (params = {}) => api.get('/intercompany/transfers', { params });
+export const finoCreateTransfer      = (data) => api.post('/intercompany/transfers', data);
+export const finoCancelTransfer      = (id, reason) => api.delete(`/intercompany/transfers/${id}`, { data: { reason } });
+export const finoNextTransferNumber  = () => api.get('/intercompany/transfers/next-number');
+export const finoListDrawings        = (params = {}) => api.get('/intercompany/drawings', { params });
+export const finoCreateDrawing       = (data) => api.post('/intercompany/drawings', data);
+export const finoCancelDrawing       = (id, reason) => api.delete(`/intercompany/drawings/${id}`, { data: { reason } });
+export const finoNextDrawingNumber   = () => api.get('/intercompany/drawings/next-number');
+
+// ─── Fino: Companies ─────────────────────────────────────────────────────────
+
+export const finoListCompanies = (params = {}) => api.get('/companies', { params });
+export const finoCreateCompany = (data) => api.post('/companies', data);
+export const finoGetCompany    = (id) => api.get(`/companies/${id}`);
+export const finoUpdateCompany = (id, data) => api.patch(`/companies/${id}`, data);
+export const finoDeleteCompany = (id) => api.delete(`/companies/${id}`);
+
+// ─── Fino Phase 16: Salary, TDS, GST ─────────────────────────────────────────
+
+export const finoListSalary    = (params = {}) => api.get('/salary', { params });
+export const finoCreateSalary  = (data) => api.post('/salary', data);
+export const finoCancelSalary  = (id, reason) => api.delete(`/salary/${id}`, { data: { reason } });
+export const finoSalarySummary = (params = {}) => api.get('/salary/summary', { params });
+
+export const finoListTds    = (params = {}) => api.get('/tds', { params });
+export const finoRecordTds  = (data) => api.post('/tds', data);
+export const finoDepositTds = (id, data) => api.post(`/tds/${id}/deposit`, data);
+export const finoCancelTds  = (id, reason) => api.delete(`/tds/${id}`, { data: { reason } });
+export const finoTdsSummary = (params = {}) => api.get('/tds/summary', { params });
+
+export const finoListGst    = (params = {}) => api.get('/gst', { params });
+export const finoRecordGst  = (data) => api.post('/gst', data);
+export const finoFileGst    = (id, data) => api.post(`/gst/${id}/file`, data);
+export const finoPayGst     = (id, data) => api.post(`/gst/${id}/pay`, data);
+export const finoCancelGst  = (id, reason) => api.delete(`/gst/${id}`, { data: { reason } });
+export const finoGstSummary = (params = {}) => api.get('/gst/summary', { params });
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export const exportExcel = (params = {}) => {

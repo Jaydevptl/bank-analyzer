@@ -601,11 +601,201 @@ async function updateLoanMeta(id, patch) {
   return data;
 }
 
+// ─── Phase 14: EMI Schedule ──────────────────────────────────────────────────
+
+function _addPeriod(dateStr, n, frequency) {
+  const d = new Date(dateStr);
+  if (frequency === 'monthly')        d.setMonth(d.getMonth() + n);
+  else if (frequency === 'quarterly') d.setMonth(d.getMonth() + n * 3);
+  else if (frequency === 'yearly')    d.setFullYear(d.getFullYear() + n);
+  else throw new Error(`Invalid frequency: ${frequency}`);
+  return d.toISOString().slice(0, 10);
+}
+
+function _periodsPerYear(frequency) {
+  if (frequency === 'monthly')   return 12;
+  if (frequency === 'quarterly') return 4;
+  if (frequency === 'yearly')    return 1;
+  throw new Error(`Invalid frequency: ${frequency}`);
+}
+
+async function generateSchedule({ loanId, startDate, installments, frequency = 'monthly' }) {
+  if (!loanId)        throw new Error('loanId required');
+  if (!startDate)     throw new Error('startDate required');
+  const n = Number(installments);
+  if (!(n > 0 && Number.isInteger(n))) throw new Error('installments must be a positive integer');
+  if (!['monthly','quarterly','yearly'].includes(frequency)) throw new Error('Invalid frequency');
+
+  const { data: loan, error } = await supabase
+    .from('fino_loans_given').select('*').eq('id', loanId).maybeSingle();
+  if (error) throw error;
+  if (!loan) throw new Error('Loan not found');
+
+  // Wipe any existing schedule rows (regenerate)
+  await supabase.from('fino_loan_schedules').delete().eq('loan_id', loanId);
+
+  const principal = Number(loan.principal_amount);
+  const ratePct   = Number(loan.interest_rate_percent) || 0;
+  const ppy       = _periodsPerYear(frequency);
+  const periodicRate = (ratePct / 100) / ppy;
+  const rows = [];
+
+  if (loan.interest_type === 'compound' && periodicRate > 0) {
+    // Standard EMI: P * r * (1+r)^n / ((1+r)^n - 1)
+    const pow = Math.pow(1 + periodicRate, n);
+    const emi = round2(principal * periodicRate * pow / (pow - 1));
+    let balance = principal;
+    for (let i = 1; i <= n; i++) {
+      const interest = round2(balance * periodicRate);
+      const principalPart = i === n ? round2(balance) : round2(emi - interest);
+      const total = round2(principalPart + interest);
+      balance = round2(balance - principalPart);
+      rows.push({
+        loan_id: loanId,
+        installment_number: i,
+        due_date: _addPeriod(startDate, i - 1, frequency),
+        principal_amount: principalPart,
+        interest_amount:  interest,
+        total_amount:     total,
+        status: 'upcoming',
+      });
+    }
+  } else if (loan.interest_type === 'simple' && periodicRate > 0) {
+    // Equal principal + declining interest on outstanding balance
+    const principalPart = round2(principal / n);
+    let balance = principal;
+    for (let i = 1; i <= n; i++) {
+      const interest = round2(balance * periodicRate);
+      const pp = i === n ? round2(balance) : principalPart;
+      const total = round2(pp + interest);
+      balance = round2(balance - pp);
+      rows.push({
+        loan_id: loanId,
+        installment_number: i,
+        due_date: _addPeriod(startDate, i - 1, frequency),
+        principal_amount: pp,
+        interest_amount:  interest,
+        total_amount:     total,
+        status: 'upcoming',
+      });
+    }
+  } else {
+    // No interest: equal principal only
+    const principalPart = round2(principal / n);
+    let balance = principal;
+    for (let i = 1; i <= n; i++) {
+      const pp = i === n ? round2(balance) : principalPart;
+      balance = round2(balance - pp);
+      rows.push({
+        loan_id: loanId,
+        installment_number: i,
+        due_date: _addPeriod(startDate, i - 1, frequency),
+        principal_amount: pp,
+        interest_amount:  0,
+        total_amount:     pp,
+        status: 'upcoming',
+      });
+    }
+  }
+
+  const { data: inserted, error: insErr } = await supabase
+    .from('fino_loan_schedules').insert(rows).select();
+  if (insErr) throw insErr;
+
+  return { schedule: inserted, count: inserted.length };
+}
+
+async function getSchedule(loanId) {
+  const { data, error } = await supabase
+    .from('fino_loan_schedules')
+    .select('*')
+    .eq('loan_id', loanId)
+    .order('installment_number');
+  if (error) throw error;
+
+  // Update upcoming → overdue / due based on today
+  const t = today();
+  const enriched = (data || []).map(r => {
+    let status = r.status;
+    if (status === 'upcoming') {
+      if (r.due_date < t) status = 'overdue';
+      else if (r.due_date === t) status = 'due';
+    }
+    return { ...r, status };
+  });
+  return enriched;
+}
+
+async function markInstallmentPaid(scheduleId, { paidDate, paidAmount }) {
+  if (!paidDate)   throw new Error('paidDate required');
+  const amt = Number(paidAmount);
+  if (!(amt > 0)) throw new Error('paidAmount must be > 0');
+
+  const { data: sch, error } = await supabase
+    .from('fino_loan_schedules').select('*').eq('id', scheduleId).maybeSingle();
+  if (error) throw error;
+  if (!sch) throw new Error('Schedule not found');
+  if (sch.status === 'paid') throw new Error('Already paid');
+
+  const { data, error: uErr } = await supabase
+    .from('fino_loan_schedules')
+    .update({ status: 'paid', paid_date: paidDate, paid_amount: amt })
+    .eq('id', scheduleId)
+    .select().single();
+  if (uErr) throw uErr;
+  return data;
+}
+
+async function getLoansOverview() {
+  const t = today();
+  const { data: schedules, error } = await supabase
+    .from('fino_loan_schedules')
+    .select('*');
+  if (error) throw error;
+
+  let upcomingCount = 0, dueCount = 0, overdueCount = 0, paidCount = 0;
+  let totalUpcoming = 0, totalOverdue = 0;
+  const upcoming30 = [];
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 30);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  for (const s of (schedules || [])) {
+    let status = s.status;
+    if (status === 'upcoming') {
+      if (s.due_date < t)        status = 'overdue';
+      else if (s.due_date === t) status = 'due';
+    }
+    if (status === 'paid')          paidCount++;
+    else if (status === 'overdue') { overdueCount++; totalOverdue += Number(s.total_amount); }
+    else if (status === 'due')      dueCount++;
+    else if (status === 'upcoming') {
+      upcomingCount++;
+      totalUpcoming += Number(s.total_amount);
+      if (s.due_date <= cutoffStr) upcoming30.push({ ...s, status });
+    }
+  }
+
+  // Total outstanding from existing live computation
+  const { data: loans } = await supabase
+    .from('fino_loans_given').select('outstanding_principal').eq('is_deleted', false);
+  const totalOutstanding = (loans || []).reduce((s, l) => s + Number(l.outstanding_principal || 0), 0);
+
+  return {
+    upcomingCount, dueCount, overdueCount, paidCount,
+    totalUpcoming: round2(totalUpcoming),
+    totalOverdue:  round2(totalOverdue),
+    totalOutstanding: round2(totalOutstanding),
+    upcomingNext30: upcoming30.sort((a, b) => a.due_date.localeCompare(b.due_date)),
+  };
+}
+
 module.exports = {
   // Service
   createLoan, listLoans, getLoan, computeOutstanding,
   recordRepayment, writeOffLoan, getBorrowerSummary, snapshotAccrual,
   cancelDisbursement, deleteLoan, deleteRepayment, updateLoanMeta,
+  // Phase 14
+  generateSchedule, getSchedule, markInstallmentPaid, getLoansOverview,
   // Pure helpers (exported for tests)
   _segmentInterest, _walkSegments, _splitRepayment,
 };

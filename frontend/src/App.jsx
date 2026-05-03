@@ -35,6 +35,10 @@ import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
 import PurchaseInvoicesPage from './components/Purchase/PurchaseInvoicesPage';
 import DevToolsPage       from './components/Settings/DevToolsPage';
+import WebsiteInvestmentsPage from './components/Investments/WebsiteInvestmentsPage';
+import PartnersPage       from './components/Partners/PartnersPage';
+import IntercompanyPage   from './components/Intercompany/IntercompanyPage';
+import StaffPage          from './components/Staff/StaffPage';
 
 // ─── Sidebar definition ──────────────────────────────────────────────────────
 // Each top-level entry is either:
@@ -73,6 +77,8 @@ const NAV_GROUPS = [
     { id: 'cb-fixed-assets', label: 'Fixed Assets',   view: 'cash-bank/fixed-assets' },
     { id: 'cb-gift-cards',   label: 'Gift Cards',     view: 'cash-bank/gift-cards' },
     { id: 'cb-credit-cards', label: 'Credit Cards',   view: 'cash-bank/credit-cards' },
+    { id: 'cb-intercompany', label: 'Inter-company',  view: 'cash-bank/intercompany' },
+    { id: 'cb-drawings',     label: 'Owner Drawings', view: 'cash-bank/drawings' },
   ]},
 
   { id: 'share-market', label: 'Share Market', Icon: TrendingUp, children: [
@@ -91,12 +97,14 @@ const NAV_GROUPS = [
   ]},
 
   { id: 'partners', label: 'Partners', Icon: Handshake, children: [
+    { id: 'pt-partnerships',  label: 'Partnerships',         view: 'partners/partnerships' },
     { id: 'pt-master',        label: 'Partner Master',       view: 'partners/master' },
     { id: 'pt-capital',       label: 'Partner Capital',      view: 'partners/capital' },
     { id: 'pt-distributions', label: 'Profit Distributions', view: 'partners/distributions' },
   ]},
 
   { id: 'investments', label: 'Investments', Icon: Gem, children: [
+    { id: 'inv-websites',      label: 'Website Investments',     view: 'investments/websites' },
     { id: 'inv-businesses',    label: 'Businesses / Projects',   view: 'investments/businesses' },
     { id: 'inv-inter-company', label: 'Inter-company Transfers', view: 'investments/inter-company' },
   ]},
@@ -113,8 +121,10 @@ const NAV_GROUPS = [
   ]},
 
   { id: 'staff', label: 'Staff', Icon: UserCog, children: [
+    { id: 'st-salary',     label: 'Salary',          view: 'staff/salary' },
+    { id: 'st-tds',        label: 'TDS',             view: 'staff/tds' },
+    { id: 'st-gst',        label: 'GST',             view: 'staff/gst' },
     { id: 'st-employees',  label: 'Employees',       view: 'staff/employees' },
-    { id: 'st-salary',     label: 'Salary Payments', view: 'staff/salary' },
     { id: 'st-petty-cash', label: 'Petty Cash',      view: 'staff/petty-cash' },
   ]},
 
@@ -175,6 +185,20 @@ const VIEW_REGISTRY = {
   'cash-bank/gift-cards':    () => <GiftCardsPage />,
   'cash-bank/credit-cards':  () => <CreditCardsPage />,
   'cash-bank/fixed-assets':  () => <FixedAssetsPage />,
+  'cash-bank/intercompany':  () => <IntercompanyPage />,
+  'cash-bank/drawings':      () => <IntercompanyPage />,
+
+  'investments/websites':      () => <WebsiteInvestmentsPage />,
+  'investments/inter-company': () => <IntercompanyPage />,
+
+  'partners/partnerships':  () => <PartnersPage />,
+  'partners/master':        () => <PartnersPage />,
+  'partners/capital':       () => <PartnersPage />,
+  'partners/distributions': () => <PartnersPage />,
+
+  'staff/salary': () => <StaffPage initialTab="salary" />,
+  'staff/tds':    () => <StaffPage initialTab="tds" />,
+  'staff/gst':    () => <StaffPage initialTab="gst" />,
 
   'reports':              () => <ReportsPage />,
   'settings/credentials': () => <CredentialsPage />,

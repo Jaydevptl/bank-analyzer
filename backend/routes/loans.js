@@ -78,4 +78,25 @@ router.delete('/repayments/:repaymentId', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// ─── Phase 14: Schedules ─────────────────────────────────────────────────────
+router.get('/summary/overview', async (req, res) => {
+  try { res.json(await loans.getLoansOverview()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/:id/generate-schedule', async (req, res) => {
+  try { res.json(await loans.generateSchedule({ ...req.body, loanId: req.params.id })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.get('/:id/schedule', async (req, res) => {
+  try { res.json({ schedule: await loans.getSchedule(req.params.id) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/schedule/:scheduleId/pay', async (req, res) => {
+  try { res.json({ installment: await loans.markInstallmentPaid(req.params.scheduleId, req.body) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 module.exports = router;

@@ -6,6 +6,7 @@ import {
   finoListParties, finoCreateParty,
   finoListBanks,
   finoCancelLoan, finoDeleteLoan, finoUpdateLoan, finoDeleteRepayment,
+  finoLoanGenerateSchedule, finoLoanGetSchedule, finoLoanPayInstallment,
 } from '../../services/api';
 import EditModal from '../shared/EditModal';
 import DeleteConfirmModal from '../shared/DeleteConfirmModal';
@@ -193,7 +194,87 @@ export default function LoansGivenPage() {
           onConfirm={(reason) => finoDeleteRepayment(modal.repayment.id, reason).then(onSaved)}
         />
       )}
+      {modal?.kind === 'genSchedule' && detail && (
+        <GenScheduleModal loan={detail.loan} onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); modal.onDone && modal.onDone(); }} />
+      )}
+      {modal?.kind === 'payInstallment' && (
+        <PayInstallmentModal schedule={modal.schedule} onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); modal.onDone && modal.onDone(); }} />
+      )}
     </div>
+  );
+}
+
+function GenScheduleModal({ loan, onClose, onSaved }) {
+  const [f, setF] = useState({ startDate: today(), installments: 12, frequency: 'monthly' });
+  const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    setErr(null); setSaving(true);
+    try {
+      const n = parseInt(f.installments, 10);
+      if (!(n > 0)) throw new Error('Installments > 0');
+      await finoLoanGenerateSchedule(loan.id, { startDate: f.startDate, installments: n, frequency: f.frequency });
+      onSaved();
+    } catch (e) { setErr(e?.response?.data?.error || e.message); setSaving(false); }
+  };
+  return (
+    <ModalShell title="Generate EMI Schedule" onClose={onClose}>
+      <div style={{ background: 'var(--bg-page)', padding: 8, borderRadius: 6, fontSize: 12, marginBottom: 10 }}>
+        Principal <b>{fmt(loan.principal_amount)}</b> · Rate <b>{loan.interest_rate_percent}% {loan.interest_type}</b>
+      </div>
+      <Field label="Start Date"><input className="input" type="date" value={f.startDate} onChange={e => set('startDate', e.target.value)} /></Field>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Field label="Installments"><input className="input" type="number" min="1" step="1" value={f.installments} onChange={e => set('installments', e.target.value)} /></Field>
+        <Field label="Frequency">
+          <select className="input" value={f.frequency} onChange={e => set('frequency', e.target.value)}>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </Field>
+      </div>
+      {err && <div style={{ padding: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', borderRadius: 6, fontSize: 12, marginBottom: 10 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={submit} disabled={saving}>
+          {saving ? 'Generating…' : 'Generate'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function PayInstallmentModal({ schedule, onClose, onSaved }) {
+  const [paidDate, setPaidDate] = useState(today());
+  const [paidAmount, setPaidAmount] = useState(schedule.total_amount);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+  const submit = async () => {
+    setErr(null); setSaving(true);
+    try {
+      if (!(Number(paidAmount) > 0)) throw new Error('Amount > 0');
+      await finoLoanPayInstallment(schedule.id, { paidDate, paidAmount: Number(paidAmount) });
+      onSaved();
+    } catch (e) { setErr(e?.response?.data?.error || e.message); setSaving(false); }
+  };
+  return (
+    <ModalShell title={`Mark Installment #${schedule.installment_number} Paid`} onClose={onClose}>
+      <div style={{ background: 'var(--bg-page)', padding: 8, borderRadius: 6, fontSize: 12, marginBottom: 10 }}>
+        Due {schedule.due_date} · Total <b>{fmt(schedule.total_amount)}</b>
+      </div>
+      <Field label="Paid Date"><input className="input" type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} /></Field>
+      <Field label="Paid Amount (₹)"><input className="input" type="number" step="0.01" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} /></Field>
+      {err && <div style={{ padding: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', borderRadius: 6, fontSize: 12, marginBottom: 10 }}>{err}</div>}
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button className="btn" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
+        <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={submit} disabled={saving}>
+          {saving ? 'Saving…' : 'Mark Paid'}
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -220,6 +301,7 @@ function LoanDetail({ data, onAct }) {
   const { loan, borrower, repayments, computed } = data;
   const sc = STATUS_COLORS[loan.status] || STATUS_COLORS.active;
   const canAct = !['closed', 'written_off'].includes(loan.status);
+  const [tab, setTab] = useState('repayments');
   return (
     <>
       <div style={{ padding: 18, borderBottom: '1px solid var(--border)' }}>
@@ -266,42 +348,137 @@ function LoanDetail({ data, onAct }) {
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
-        <h3 style={{ margin: '0 0 10px', fontSize: 13 }}>Repayment History</h3>
-        {repayments.length === 0 ? (
-          <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No repayments yet.</div>
-        ) : (
-          <table style={{ width: '100%', fontSize: 12 }}>
-            <thead>
-              <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase' }}>
-                <th style={{ padding: '6px 8px' }}>Date</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Total</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Interest</th>
-                <th style={{ padding: '6px 8px', textAlign: 'right' }}>Principal</th>
-                <th style={{ padding: '6px 8px' }}>Notes</th>
-                <th style={{ padding: '6px 8px', width: 30 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {repayments.map(r => (
-                <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: 8 }}>{r.repayment_date}</td>
-                  <td style={{ padding: 8, textAlign: 'right', fontWeight: 600 }}>{fmt(r.amount_received)}</td>
-                  <td style={{ padding: 8, textAlign: 'right', color: 'var(--warning)' }}>{fmt(r.interest_portion)}</td>
-                  <td style={{ padding: 8, textAlign: 'right', color: 'var(--success)' }}>{fmt(r.principal_portion)}</td>
-                  <td style={{ padding: 8, color: 'var(--text-secondary)' }}>{r.notes || '—'}</td>
-                  <td style={{ padding: 8, textAlign: 'right' }}>
-                    <RowMenu items={[
-                      { label: 'Delete (reverse)', icon: <Trash2 size={12} />, danger: true,
-                        onClick: () => onAct({ kind: 'deleteRepayment', repayment: r }) },
-                    ]} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+      <div style={{ display: 'flex', gap: 4, padding: '0 14px', borderBottom: '1px solid var(--border)' }}>
+        {['repayments','schedule'].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: '8px 14px', border: 'none', cursor: 'pointer',
+            background: tab === t ? 'var(--bg-page)' : 'transparent',
+            borderRadius: '6px 6px 0 0',
+            fontSize: 12, fontWeight: tab === t ? 700 : 500,
+            color: tab === t ? 'var(--text-primary)' : 'var(--text-muted)',
+            borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
+          }}>{t === 'repayments' ? 'Repayments' : 'EMI Schedule'}</button>
+        ))}
       </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+        {tab === 'repayments' && (
+          repayments.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>No repayments yet.</div>
+          ) : (
+            <table style={{ width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase' }}>
+                  <th style={{ padding: '6px 8px' }}>Date</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Total</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Interest</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right' }}>Principal</th>
+                  <th style={{ padding: '6px 8px' }}>Notes</th>
+                  <th style={{ padding: '6px 8px', width: 30 }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {repayments.map(r => (
+                  <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: 8 }}>{r.repayment_date}</td>
+                    <td style={{ padding: 8, textAlign: 'right', fontWeight: 600 }}>{fmt(r.amount_received)}</td>
+                    <td style={{ padding: 8, textAlign: 'right', color: 'var(--warning)' }}>{fmt(r.interest_portion)}</td>
+                    <td style={{ padding: 8, textAlign: 'right', color: 'var(--success)' }}>{fmt(r.principal_portion)}</td>
+                    <td style={{ padding: 8, color: 'var(--text-secondary)' }}>{r.notes || '—'}</td>
+                    <td style={{ padding: 8, textAlign: 'right' }}>
+                      <RowMenu items={[
+                        { label: 'Delete (reverse)', icon: <Trash2 size={12} />, danger: true,
+                          onClick: () => onAct({ kind: 'deleteRepayment', repayment: r }) },
+                      ]} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        )}
+        {tab === 'schedule' && <ScheduleTab loanId={loan.id} onAct={onAct} />}
+      </div>
+    </>
+  );
+}
+
+function ScheduleTab({ loanId, onAct }) {
+  const [rows, setRows] = useState(null);
+  const reload = useCallback(async () => {
+    try { const r = await finoLoanGetSchedule(loanId); setRows(r.data.schedule || []); }
+    catch { setRows([]); }
+  }, [loanId]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (rows === null) return <div className="spinner" />;
+
+  if (rows.length === 0) {
+    return (
+      <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+        <div style={{ marginBottom: 10 }}>No EMI schedule generated for this loan yet.</div>
+        <button className="btn btn-primary btn-sm" onClick={() => onAct({ kind: 'genSchedule', onDone: reload })}>
+          <Plus size={13} /> Generate Schedule
+        </button>
+      </div>
+    );
+  }
+
+  const STATUS_COL = {
+    paid:     { bg: 'rgba(34,197,94,0.15)',  c: '#22c55e' },
+    due:      { bg: 'rgba(245,158,11,0.15)', c: '#f59e0b' },
+    overdue:  { bg: 'rgba(239,68,68,0.15)',  c: '#ef4444' },
+    upcoming: { bg: 'rgba(120,120,120,0.15)', c: 'var(--text-muted)' },
+    skipped:  { bg: 'rgba(120,120,120,0.15)', c: 'var(--text-muted)' },
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <button className="btn btn-ghost btn-xs" onClick={() => onAct({ kind: 'genSchedule', onDone: reload })}>
+          <RotateCcw size={12} /> Regenerate
+        </button>
+      </div>
+      <table style={{ width: '100%', fontSize: 12 }}>
+        <thead>
+          <tr style={{ textAlign: 'left', color: 'var(--text-muted)', fontSize: 10, textTransform: 'uppercase' }}>
+            <th style={{ padding: '6px 8px' }}>#</th>
+            <th style={{ padding: '6px 8px' }}>Due</th>
+            <th style={{ padding: '6px 8px', textAlign: 'right' }}>Principal</th>
+            <th style={{ padding: '6px 8px', textAlign: 'right' }}>Interest</th>
+            <th style={{ padding: '6px 8px', textAlign: 'right' }}>Total</th>
+            <th style={{ padding: '6px 8px' }}>Status</th>
+            <th style={{ padding: '6px 8px' }}>Paid</th>
+            <th style={{ padding: '6px 8px', width: 30 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const sc = STATUS_COL[r.status] || STATUS_COL.upcoming;
+            return (
+              <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: 8, fontWeight: 700 }}>{r.installment_number}</td>
+                <td style={{ padding: 8 }}>{r.due_date}</td>
+                <td style={{ padding: 8, textAlign: 'right' }}>{fmt(r.principal_amount)}</td>
+                <td style={{ padding: 8, textAlign: 'right', color: 'var(--warning)' }}>{fmt(r.interest_amount)}</td>
+                <td style={{ padding: 8, textAlign: 'right', fontWeight: 700 }}>{fmt(r.total_amount)}</td>
+                <td style={{ padding: 8 }}>
+                  <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: sc.bg, color: sc.c }}>
+                    {r.status}
+                  </span>
+                </td>
+                <td style={{ padding: 8, color: 'var(--text-muted)' }}>{r.paid_date ? `${r.paid_date} · ${fmt(r.paid_amount)}` : '—'}</td>
+                <td style={{ padding: 8, textAlign: 'right' }}>
+                  <RowMenu items={[
+                    { label: 'Mark Paid', disabled: r.status === 'paid',
+                      onClick: () => onAct({ kind: 'payInstallment', schedule: r, onDone: reload }) },
+                  ]} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </>
   );
 }
