@@ -358,8 +358,35 @@ function AddMemberModal({ partnershipId, existingPctSum, onClose, onSaved }) {
 }
 
 function DistributeModal({ partnershipId, members, onClose, onSaved }) {
-  const [f, setF] = useState({ periodLabel: '', periodFrom: '', periodTo: '', grossProfit: '', totalExpenses: '', notes: '' });
+  // Default to current month range
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const lastOfMonth  = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const monthLabel   = today.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+
+  const [f, setF] = useState({
+    periodLabel: monthLabel, periodFrom: firstOfMonth, periodTo: lastOfMonth,
+    grossProfit: '', totalExpenses: '', notes: '',
+    labelManuallyEdited: false,
+  });
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  // Auto-recompute label when from/to change (unless user has manually edited it)
+  const setDate = (k, v) => setF(s => {
+    const next = { ...s, [k]: v };
+    if (!s.labelManuallyEdited && next.periodFrom && next.periodTo) {
+      const from = new Date(next.periodFrom);
+      const to   = new Date(next.periodTo);
+      if (from.getFullYear() === to.getFullYear() && from.getMonth() === to.getMonth()) {
+        next.periodLabel = from.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      } else {
+        const f1 = from.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        const t1 = to.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        next.periodLabel = `${f1} – ${t1}`;
+      }
+    }
+    return next;
+  });
+  const setLabel = (v) => setF(s => ({ ...s, periodLabel: v, labelManuallyEdited: true }));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -391,12 +418,15 @@ function DistributeModal({ partnershipId, members, onClose, onSaved }) {
   const submit = async () => {
     setErr(null); setSaving(true);
     try {
+      if (!f.periodFrom)         throw new Error('Period From date required');
+      if (!f.periodTo)           throw new Error('Period To date required');
+      if (f.periodTo < f.periodFrom) throw new Error('Period To must be on/after Period From');
       if (!f.periodLabel.trim()) throw new Error('Period label required');
       if (Number.isNaN(Number(f.grossProfit))) throw new Error('Gross profit required');
       await finoCreateDistribution(partnershipId, {
         periodLabel: f.periodLabel.trim(),
-        periodFrom: f.periodFrom || null,
-        periodTo: f.periodTo || null,
+        periodFrom: f.periodFrom,
+        periodTo: f.periodTo,
         grossProfit: Number(f.grossProfit),
         totalExpenses: Number(f.totalExpenses) || 0,
         notes: f.notes,
@@ -407,11 +437,13 @@ function DistributeModal({ partnershipId, members, onClose, onSaved }) {
 
   return (
     <ModalShell title="New Distribution" onClose={onClose} maxWidth={560}>
-      <Field label="Period Label"><input className="input" value={f.periodLabel} onChange={e => set('periodLabel', e.target.value)} placeholder="Mar 2026" /></Field>
       <div style={{ display: 'flex', gap: 8 }}>
-        <Field label="From"><input className="input" type="date" value={f.periodFrom} onChange={e => set('periodFrom', e.target.value)} /></Field>
-        <Field label="To"><input className="input" type="date" value={f.periodTo} onChange={e => set('periodTo', e.target.value)} /></Field>
+        <Field label="Period From *"><input className="input" type="date" value={f.periodFrom} onChange={e => setDate('periodFrom', e.target.value)} required /></Field>
+        <Field label="Period To *"><input className="input" type="date" value={f.periodTo} onChange={e => setDate('periodTo', e.target.value)} required /></Field>
       </div>
+      <Field label="Period Label" hint="Auto-derived from dates; edit if needed">
+        <input className="input" value={f.periodLabel} onChange={e => setLabel(e.target.value)} placeholder="Mar 2026" />
+      </Field>
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label="Gross Profit (₹)"><input className="input" type="number" step="0.01" value={f.grossProfit} onChange={e => set('grossProfit', e.target.value)} /></Field>
         <Field label="Total Expenses (₹)"><input className="input" type="number" step="0.01" value={f.totalExpenses} onChange={e => set('totalExpenses', e.target.value)} /></Field>

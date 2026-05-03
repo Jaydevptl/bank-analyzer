@@ -230,6 +230,9 @@ async function createDistribution({
 }) {
   if (!partnershipId) throw new Error('partnershipId required');
   if (!periodLabel?.trim()) throw new Error('periodLabel required');
+  if (!periodFrom) throw new Error('periodFrom required');
+  if (!periodTo)   throw new Error('periodTo required');
+  if (periodTo < periodFrom) throw new Error('periodTo must be on/after periodFrom');
   const gp = Number(grossProfit);
   if (Number.isNaN(gp)) throw new Error('grossProfit required (number)');
   const exp = Number(totalExpenses) || 0;
@@ -247,8 +250,8 @@ async function createDistribution({
     .from('fino_profit_distributions').insert({
       partnership_id: partnershipId,
       period_label: periodLabel.trim(),
-      period_from: periodFrom || null,
-      period_to:   periodTo   || null,
+      period_from: periodFrom,
+      period_to:   periodTo,
       gross_profit: gp,
       total_expenses: exp,
       net_distributable: net,
