@@ -84,7 +84,7 @@ export default function ShareMarketPage() {
                 background: selId === a.id ? 'var(--bg-hover)' : 'transparent',
               }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
-                  {a.broker?.name} · {a.account_holder_name}
+                  {a.broker?.name} · {a.account_holder}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
                   {a.client_id ? `Client: ${a.client_id}` : ''}
@@ -134,7 +134,7 @@ export default function ShareMarketPage() {
         <UpdatePricesModal holdings={detail.holdings} onClose={() => setModal(null)} onSaved={onSaved} />
       )}
       {modal?.kind === 'deleteAccount' && detail && (
-        <DeleteConfirmModal title={`Delete ${detail.account.account_holder_name}`}
+        <DeleteConfirmModal title={`Delete ${detail.account.account_holder}`}
           description="This will reverse all stock buys, sells, and dividend ledger entries; remove all holdings; and refresh the linked bank balance."
           warning="Realized P&L history will be lost."
           confirmLabel="Delete Account"
@@ -194,7 +194,7 @@ function AccountDetail({ detail, tab, setTab, pnlData, onAct }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>
-              {account.broker?.name} · {account.account_holder_name}
+              {account.broker?.name} · {account.account_holder}
             </h2>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
               {account.client_id ? `Client: ${account.client_id}` : ''}
@@ -441,7 +441,7 @@ function NewAccountModal({ onClose, onSaved }) {
         <div style={{ display: 'flex', gap: 6 }}>
           <select className="input" style={{ flex: 1 }} value={brokerId} onChange={e => setBrokerId(e.target.value)}>
             <option value="">— Select broker —</option>
-            {brokers.map(b => <option key={b.id} value={b.id}>{b.name}{b.code ? ` (${b.code})` : ''}</option>)}
+            {brokers.map(b => <option key={b.id} value={b.id}>{b.name}{b.broker_code ? ` (${b.broker_code})` : ''}</option>)}
           </select>
           <button className="btn btn-sm" onClick={() => setShowAddBroker(s => !s)}>+ Broker</button>
         </div>
@@ -493,7 +493,7 @@ function BuyModal({ account, onClose, onSaved }) {
     } catch (e) { setErr(e?.response?.data?.error || e.message); setSaving(false); }
   };
   return (
-    <ModalShell title={`Buy · ${account.broker?.name} - ${account.account_holder_name}`} onClose={onClose} maxWidth={520}>
+    <ModalShell title={`Buy · ${account.broker?.name} - ${account.account_holder}`} onClose={onClose} maxWidth={520}>
       <div style={{ display: 'flex', gap: 8 }}>
         <Field label="Date"><input className="input" type="date" value={f.txnDate} onChange={e => set('txnDate', e.target.value)} /></Field>
         <Field label="Symbol"><input className="input" value={f.symbol} onChange={e => set('symbol', e.target.value.toUpperCase())} placeholder="RELIANCE" /></Field>
@@ -545,7 +545,7 @@ function SellModal({ account, holdings, onClose, onSaved }) {
     } catch (e) { setErr(e?.response?.data?.error || e.message); setSaving(false); }
   };
   return (
-    <ModalShell title={`Sell · ${account.broker?.name} - ${account.account_holder_name}`} onClose={onClose} maxWidth={520}>
+    <ModalShell title={`Sell · ${account.broker?.name} - ${account.account_holder}`} onClose={onClose} maxWidth={520}>
       <Field label="Symbol"
         hint={holding ? `Available: ${fmtN(holding.quantity)} @ avg ₹${holding.avg_buy_price}` : 'No holding selected'}>
         <select className="input" value={f.symbol} onChange={e => { const sel = active.find(a => a.symbol === e.target.value); set('symbol', e.target.value); if (sel) set('exchange', sel.exchange || 'NSE'); }}>
@@ -589,7 +589,7 @@ function DividendModal({ account, holdings, onClose, onSaved }) {
     } catch (e) { setErr(e?.response?.data?.error || e.message); setSaving(false); }
   };
   return (
-    <ModalShell title={`Dividend · ${account.broker?.name} - ${account.account_holder_name}`} onClose={onClose}>
+    <ModalShell title={`Dividend · ${account.broker?.name} - ${account.account_holder}`} onClose={onClose}>
       <Field label="Date"><input className="input" type="date" value={f.txnDate} onChange={e => set('txnDate', e.target.value)} /></Field>
       <Field label="Symbol (optional)">
         <input className="input" list="sym-list" value={f.symbol} onChange={e => set('symbol', e.target.value.toUpperCase())} />

@@ -86,7 +86,7 @@ async function createBroker({ name, code, notes }) {
   const { data, error } = await supabase
     .from('fino_brokers').insert({
       name: name.trim(),
-      code: code?.trim() || null,
+      broker_code: code?.trim() || null,
       notes: notes?.trim() || null,
     }).select().single();
   if (error) throw error;
@@ -98,8 +98,8 @@ async function createBroker({ name, code, notes }) {
 async function listBrokerAccounts({ brokerId = null, includeDeleted = false } = {}) {
   let q = supabase
     .from('fino_broker_accounts')
-    .select('*, broker:fino_brokers(id, name, code), bank:fino_bank_accounts(id, account_name, bank_name)')
-    .order('account_holder_name');
+    .select('*, broker:fino_brokers(id, name, broker_code), bank:fino_bank_accounts(id, account_name, bank_name)')
+    .order('account_holder');
   if (!includeDeleted) q = q.eq('is_deleted', false);
   if (brokerId) q = q.eq('broker_id', brokerId);
   const { data, error } = await q;
@@ -110,7 +110,7 @@ async function listBrokerAccounts({ brokerId = null, includeDeleted = false } = 
 async function getBrokerAccount(id) {
   const { data: account, error } = await supabase
     .from('fino_broker_accounts')
-    .select('*, broker:fino_brokers(id, name, code), bank:fino_bank_accounts(id, account_name, bank_name)')
+    .select('*, broker:fino_brokers(id, name, broker_code), bank:fino_bank_accounts(id, account_name, bank_name)')
     .eq('id', id).maybeSingle();
   if (error) throw error;
   if (!account) return null;
@@ -154,7 +154,7 @@ async function createBrokerAccount(payload) {
   const { data, error } = await supabase
     .from('fino_broker_accounts').insert({
       broker_id: brokerId,
-      account_holder_name: accountHolderName.trim(),
+      account_holder: accountHolderName.trim(),
       client_id: clientId?.trim() || null,
       pan: pan?.trim() || null,
       linked_bank_account_id: linkedBankAccountId || null,
