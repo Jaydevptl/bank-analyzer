@@ -485,7 +485,6 @@ function NewInvoiceModal({ onClose, onSaved }) {
       type: item.type,
       stockAvailable: Number(item.current_stock_qty || 0),
       query: '',
-      focused: false,
     });
   };
 
@@ -608,14 +607,6 @@ function NewInvoiceModal({ onClose, onSaved }) {
                   const lt = (Number(l.quantity) || 0) * (Number(l.rate) || 0);
                   const ga = lt * (Number(l.gstRate) || 0) / 100;
                   const total = lt + ga;
-                  const q = (l.query || '').toLowerCase();
-                  const matches = q
-                    ? allItems.filter(it =>
-                        it.name?.toLowerCase().includes(q) ||
-                        it.sku?.toLowerCase().includes(q) ||
-                        it.hsn_sac_code?.toLowerCase().includes(q)
-                      ).slice(0, 8)
-                    : allItems.slice(0, 8); // show first 8 on focus
                   return (
                     <tr key={i} style={{ borderTop: '1px solid var(--border)', verticalAlign: 'top' }}>
                       <td style={{ padding: '6px 8px' }}>
@@ -628,52 +619,28 @@ function NewInvoiceModal({ onClose, onSaved }) {
                               </div>
                             )}
                             <button className="btn btn-ghost btn-xs" style={{ padding: 0, fontSize: 10, marginTop: 2 }}
-                              onClick={() => updateLine(i, { itemId: null, itemName: '', query: '' })}>Change</button>
+                              onClick={() => updateLine(i, { itemId: null, itemName: '', rate: 0, gstRate: 0, unit: '', costPrice: 0, type: null, stockAvailable: 0 })}>
+                              Change
+                            </button>
                           </div>
                         ) : (
-                          <div style={{ position: 'relative' }}>
-                            <input className="input" placeholder="Search item by name / SKU / HSN…"
-                              value={l.query || ''}
-                              onFocus={() => updateLine(i, { focused: true })}
-                              onBlur={() => setTimeout(() => updateLine(i, { focused: false }), 150)}
-                              onChange={e => updateLine(i, { query: e.target.value, focused: true })} />
-                            {l.focused && (
-                              <div style={{
-                                position: 'absolute', top: '100%', left: 0, right: 0,
-                                background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                                borderRadius: 6, marginTop: 2, zIndex: 50,
-                                maxHeight: 240, overflowY: 'auto',
-                                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
-                              }}>
-                                {itemsLoading ? (
-                                  <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>Loading items…</div>
-                                ) : allItems.length === 0 ? (
-                                  <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
-                                    No items in database. Add items via the Items page first.
-                                  </div>
-                                ) : matches.length === 0 ? (
-                                  <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
-                                    No items match "{l.query}".
-                                  </div>
-                                ) : matches.map(it => (
-                                  <div key={it.id}
-                                    onMouseDown={(e) => { e.preventDefault(); onItemPick(i, it); }}
-                                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)' }}
-                                    onMouseEnter={(e) => e.currentTarget.style.background = 'var(--bg-hover)'}
-                                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-                                    <div style={{ fontWeight: 600 }}>{it.name}</div>
-                                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                                      {it.sku ? `SKU: ${it.sku} · ` : ''}
-                                      {it.type}
-                                      {' · '}{fmt(it.default_sale_price || 0)}
-                                      {' · GST '}{it.gst_rate || 0}%
-                                      {it.type === 'product' && ` · Stock: ${fmtN(it.current_stock_qty || 0)}`}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                          <select className="input" value=""
+                            onChange={e => {
+                              const item = allItems.find(it => it.id === e.target.value);
+                              if (item) onItemPick(i, item);
+                            }}
+                            style={{ width: '100%', minWidth: 180 }}>
+                            <option value="">— Select item —</option>
+                            {itemsLoading ? (
+                              <option disabled>Loading items…</option>
+                            ) : allItems.length === 0 ? (
+                              <option disabled>No items. Add via Items page first.</option>
+                            ) : allItems.map(it => (
+                              <option key={it.id} value={it.id}>
+                                {it.name}{it.sku ? ` (${it.sku})` : ''} — ₹{it.default_sale_price || 0} GST {it.gst_rate || 0}%{it.type === 'product' ? ` Stock: ${it.current_stock_qty || 0}` : ''}
+                              </option>
+                            ))}
+                          </select>
                         )}
                       </td>
                       <td style={{ padding: '6px 8px' }}>
