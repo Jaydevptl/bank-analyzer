@@ -26,6 +26,7 @@ import FixedAssetsPage    from './components/CashBank/FixedAssetsPage';
 import LoansGivenPage     from './components/CashBank/LoansGivenPage';
 import GiftCardsPage      from './components/CashBank/GiftCardsPage';
 import CreditCardsPage    from './components/CashBank/CreditCardsPage';
+import CashConversionsPage from './components/CashBank/CashConversionsPage';
 import PartiesPage        from './components/Parties/PartiesPage';
 import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
@@ -64,6 +65,7 @@ const NAV_GROUPS = [
   { id: 'cash-bank', label: 'Cash, Bank & Assets', Icon: Landmark, children: [
     { id: 'cb-banks',        label: 'Bank Accounts',  view: 'cash-bank/banks' },
     { id: 'cb-cash',         label: 'Cash in Hand',   view: 'cash-bank/cash' },
+    { id: 'cb-conversions',  label: 'Cash Conversions', view: 'cash-bank/conversions' },
     { id: 'cb-loans',        label: 'Loans Given',    view: 'cash-bank/loans' },
     { id: 'cb-fixed-assets', label: 'Fixed Assets',   view: 'cash-bank/fixed-assets' },
     { id: 'cb-gift-cards',   label: 'Gift Cards',     view: 'cash-bank/gift-cards' },
@@ -164,6 +166,7 @@ const VIEW_REGISTRY = {
 
   'cash-bank/banks':         () => <BankAccountsPage />,
   'cash-bank/cash':          () => <CashInHandPage />,
+  'cash-bank/conversions':   () => <CashConversionsPage />,
   'cash-bank/loans':         () => <LoansGivenPage />,
   'cash-bank/gift-cards':    () => <GiftCardsPage />,
   'cash-bank/credit-cards':  () => <CreditCardsPage />,

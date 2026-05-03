@@ -249,6 +249,18 @@ export const finoMakeBillPayment    = (id, data) => api.post(`/purchase-invoices
 export const finoDeleteBillPayment  = (pid, reason) => api.delete(`/purchase-invoices/payments/${pid}`, { data: { reason } });
 export const finoSupplierPayable    = (partyId) => api.get(`/purchase-invoices/supplier/${partyId}/payable`);
 
+// ─── Fino Phase 7: Cash Conversions ──────────────────────────────────────────
+
+export const finoListConversions    = (params = {}) => api.get('/cash-conversions', { params });
+export const finoGetConversion      = (id) => api.get(`/cash-conversions/${id}`);
+export const finoCreateConversion   = (data) => api.post('/cash-conversions', data);
+export const finoUpdateConversion   = (id, data) => api.patch(`/cash-conversions/${id}`, data);
+export const finoCancelConversion   = (id, reason) => api.delete(`/cash-conversions/${id}`, { data: { reason } });
+export const finoNextConversionNumber = () => api.get('/cash-conversions/next-number');
+export const finoConversionSummary  = () => api.get('/cash-conversions/summary');
+export const finoMarkCashReceived   = (id, data) => api.post(`/cash-conversions/${id}/cash-received`, data);
+export const finoMarkGstReceived    = (id, data) => api.post(`/cash-conversions/${id}/gst-invoice-received`, data);
+
 // ─── Fino Phase 3d: Credit Cards ──────────────────────────────────────────────
 
 export const finoListCC          = (params = {}) => api.get('/credit-cards', { params });
