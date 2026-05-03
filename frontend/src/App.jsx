@@ -29,6 +29,7 @@ import CreditCardsPage    from './components/CashBank/CreditCardsPage';
 import CashConversionsPage from './components/CashBank/CashConversionsPage';
 import StatementUploadPage from './components/BankStatement/StatementUploadPage';
 import ShareMarketPage    from './components/ShareMarket/ShareMarketPage';
+import AmazonImportPage   from './components/AmazonImport/AmazonImportPage';
 import PartiesPage        from './components/Parties/PartiesPage';
 import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
@@ -83,10 +84,9 @@ const NAV_GROUPS = [
   ]},
 
   { id: 'amazon-cards', label: 'Amazon Cards', Icon: ShoppingCart, children: [
+    { id: 'amz-hawala',    label: 'Hawala',           view: 'amazon-cards/cards' },
     { id: 'amz-cards',     label: 'Cards',            view: 'amazon-cards/cards' },
-    { id: 'amz-loads',     label: 'Card Loads',       view: 'amazon-cards/loads' },
     { id: 'amz-orders',    label: 'Amazon Orders',    view: 'amazon-cards/orders' },
-    { id: 'amz-transfers', label: 'Card Transfers',   view: 'amazon-cards/transfers' },
     { id: 'amz-shipments', label: 'Import Shipments', view: 'amazon-cards/shipments' },
   ]},
 
@@ -162,11 +162,11 @@ const VIEW_REGISTRY = {
   'share-market/holdings':  () => <ShareMarketPage />,
   'share-market/dividends': () => <ShareMarketPage />,
 
-  'amazon-cards/cards':     () => <Amazon />,
-  'amazon-cards/loads':     () => <Amazon />,
-  'amazon-cards/orders':    () => <Amazon />,
-  'amazon-cards/transfers': () => <Amazon />,
-  'amazon-cards/shipments': () => <Amazon />,
+  'amazon-cards/cards':     () => <AmazonImportPage />,
+  'amazon-cards/loads':     () => <AmazonImportPage />,
+  'amazon-cards/orders':    () => <AmazonImportPage />,
+  'amazon-cards/transfers': () => <AmazonImportPage />,
+  'amazon-cards/shipments': () => <AmazonImportPage />,
 
   'cash-bank/banks':         () => <BankAccountsPage />,
   'cash-bank/cash':          () => <CashInHandPage />,

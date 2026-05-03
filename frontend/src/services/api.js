@@ -288,6 +288,40 @@ export const finoSmBulkUpdatePrices = (updates) => api.post('/share-market/holdi
 export const finoSmPnL             = (id, params = {}) => api.get(`/share-market/accounts/${id}/pnl`, { params });
 export const finoSmDashboard       = () => api.get('/share-market/dashboard');
 
+// ─── Fino Phase 11: Amazon Import (Hawala + US Cards + Orders + Shipments) ──
+
+export const finoAiDashboard          = () => api.get('/amazon-import/dashboard');
+
+export const finoAiListHawala         = (params = {}) => api.get('/amazon-import/hawala', { params });
+export const finoAiNextHawalaNumber   = () => api.get('/amazon-import/hawala/next-number');
+export const finoAiHawalaSummary      = () => api.get('/amazon-import/hawala/summary');
+export const finoAiCreateHawala       = (data) => api.post('/amazon-import/hawala', data);
+export const finoAiGetHawala          = (id) => api.get(`/amazon-import/hawala/${id}`);
+export const finoAiHawalaInrPaid      = (id, data) => api.post(`/amazon-import/hawala/${id}/inr-paid`, data);
+export const finoAiHawalaUsdReceived  = (id, data) => api.post(`/amazon-import/hawala/${id}/usd-received`, data);
+export const finoAiCancelHawala       = (id, reason) => api.delete(`/amazon-import/hawala/${id}`, { data: { reason } });
+
+export const finoAiListCards          = () => api.get('/amazon-import/cards');
+export const finoAiGetCard            = (id) => api.get(`/amazon-import/cards/${id}`);
+export const finoAiCreateCard         = (data) => api.post('/amazon-import/cards', data);
+export const finoAiLoadCard           = (id, data) => api.post(`/amazon-import/cards/${id}/load`, data);
+export const finoAiTransferCard       = (id, data) => api.post(`/amazon-import/cards/${id}/transfer`, data);
+export const finoAiDeleteCard         = (id, reason) => api.delete(`/amazon-import/cards/${id}`, { data: { reason } });
+
+export const finoAiListOrders         = (params = {}) => api.get('/amazon-import/orders', { params });
+export const finoAiCreateOrder        = (data) => api.post('/amazon-import/orders', data);
+export const finoAiGetOrder           = (id) => api.get(`/amazon-import/orders/${id}`);
+export const finoAiDeleteOrder        = (id, reason) => api.delete(`/amazon-import/orders/${id}`, { data: { reason } });
+
+export const finoAiListShipments      = (params = {}) => api.get('/amazon-import/shipments', { params });
+export const finoAiNextShipmentNumber = () => api.get('/amazon-import/shipments/next-number');
+export const finoAiCreateShipment     = (data) => api.post('/amazon-import/shipments', data);
+export const finoAiGetShipment        = (id) => api.get(`/amazon-import/shipments/${id}`);
+export const finoAiLinkOrder          = (id, orderId) => api.post(`/amazon-import/shipments/${id}/link-order`, { orderId });
+export const finoAiAllocate           = (id) => api.post(`/amazon-import/shipments/${id}/allocate`);
+export const finoAiShipmentReceived   = (id, data) => api.post(`/amazon-import/shipments/${id}/received`, data);
+export const finoAiCancelShipment     = (id, reason) => api.delete(`/amazon-import/shipments/${id}`, { data: { reason } });
+
 // ─── Fino Phase 3d: Credit Cards ──────────────────────────────────────────────
 
 export const finoListCC          = (params = {}) => api.get('/credit-cards', { params });
