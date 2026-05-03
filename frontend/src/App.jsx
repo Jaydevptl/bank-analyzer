@@ -39,6 +39,11 @@ import WebsiteInvestmentsPage from './components/Investments/WebsiteInvestmentsP
 import PartnersPage       from './components/Partners/PartnersPage';
 import IntercompanyPage   from './components/Intercompany/IntercompanyPage';
 import StaffPage          from './components/Staff/StaffPage';
+import RecurringExpensesPage from './components/Recurring/RecurringExpensesPage';
+import PettyCashPage      from './components/Staff/PettyCashPage';
+import SaleReturnsPage    from './components/Sale/SaleReturnsPage';
+import DocumentsPage      from './components/Documents/DocumentsPage';
+import FinancialReportsPage from './components/Reports/FinancialReportsPage';
 
 // ─── Sidebar definition ──────────────────────────────────────────────────────
 // Each top-level entry is either:
@@ -52,10 +57,10 @@ const NAV_GROUPS = [
 
   { id: 'sale', label: 'Sale', Icon: DollarSign, children: [
     { id: 'sale-invoices',     label: 'Sale Invoices',         view: 'sale/invoices' },
+    { id: 'sale-returns',      label: 'Sale Returns / CN',     view: 'sale/returns' },
     { id: 'sale-estimates',    label: 'Estimate / Quotation',  view: 'sale/estimates' },
     { id: 'sale-payment-in',   label: 'Payment-In',            view: 'sale/payment-in' },
     { id: 'sale-orders',       label: 'Sale Order',            view: 'sale/orders' },
-    { id: 'sale-returns',      label: 'Sale Return / CN',      view: 'sale/returns' },
     { id: 'sale-pos',          label: 'POS',                   view: 'sale/pos' },
     { id: 'sale-other-income', label: 'Other Income',          view: 'sale/other-income' },
   ]},
@@ -124,8 +129,9 @@ const NAV_GROUPS = [
     { id: 'st-salary',     label: 'Salary',          view: 'staff/salary' },
     { id: 'st-tds',        label: 'TDS',             view: 'staff/tds' },
     { id: 'st-gst',        label: 'GST',             view: 'staff/gst' },
-    { id: 'st-employees',  label: 'Employees',       view: 'staff/employees' },
     { id: 'st-petty-cash', label: 'Petty Cash',      view: 'staff/petty-cash' },
+    { id: 'st-recurring',  label: 'Recurring Expenses', view: 'staff/recurring' },
+    { id: 'st-employees',  label: 'Employees',       view: 'staff/employees' },
   ]},
 
   { id: 'tax', label: 'Tax & Compliance', Icon: FileText, children: [
@@ -134,11 +140,23 @@ const NAV_GROUPS = [
     { id: 'tx-gst-output', label: 'GST Output',     view: 'tax/gst-output' },
   ]},
 
-  { id: 'reports', label: 'Reports', Icon: BarChart3, view: 'reports' },
+  { id: 'reports', label: 'Reports', Icon: BarChart3, children: [
+    { id: 'rpt-pnl',         label: 'Profit & Loss',  view: 'reports/pnl' },
+    { id: 'rpt-balance',     label: 'Balance Sheet',  view: 'reports/balance' },
+    { id: 'rpt-cashflow',    label: 'Cash Flow',      view: 'reports/cashflow' },
+    { id: 'rpt-trial',       label: 'Trial Balance',  view: 'reports/trial' },
+    { id: 'rpt-tax',         label: 'Tax Summary',    view: 'reports/tax' },
+    { id: 'rpt-daybook',     label: 'Day Book',       view: 'reports/daybook' },
+    { id: 'rpt-ledger',      label: 'Ledger',         view: 'reports/ledger' },
+    { id: 'rpt-receivables', label: 'Receivables',    view: 'reports/receivables' },
+    { id: 'rpt-payables',    label: 'Payables',       view: 'reports/payables' },
+    { id: 'rpt-uploads',     label: 'Upload History', view: 'reports/uploads' },
+  ]},
 
   { id: 'settings', label: 'Settings', Icon: Settings, children: [
     { id: 'set-company',     label: 'Company / Firm',     view: 'settings/company' },
     { id: 'set-users',       label: 'Users & Roles',      view: 'settings/users' },
+    { id: 'set-documents',   label: 'Documents',          view: 'settings/documents' },
     { id: 'set-backup',      label: 'Backup & Restore',   view: 'settings/backup' },
     { id: 'set-credentials', label: 'Credentials',        view: 'settings/credentials' },
     { id: 'set-recurring',   label: 'Recurring Rules',    view: 'settings/recurring' },
@@ -196,9 +214,26 @@ const VIEW_REGISTRY = {
   'partners/capital':       () => <PartnersPage />,
   'partners/distributions': () => <PartnersPage />,
 
-  'staff/salary': () => <StaffPage initialTab="salary" />,
-  'staff/tds':    () => <StaffPage initialTab="tds" />,
-  'staff/gst':    () => <StaffPage initialTab="gst" />,
+  'staff/salary':     () => <StaffPage initialTab="salary" />,
+  'staff/tds':        () => <StaffPage initialTab="tds" />,
+  'staff/gst':        () => <StaffPage initialTab="gst" />,
+  'staff/petty-cash': () => <PettyCashPage />,
+  'staff/recurring':  () => <RecurringExpensesPage />,
+
+  'sale/returns':     () => <SaleReturnsPage />,
+
+  'settings/documents': () => <DocumentsPage />,
+
+  'reports/pnl':         () => <FinancialReportsPage initialReport="pnl" />,
+  'reports/balance':     () => <FinancialReportsPage initialReport="balance" />,
+  'reports/cashflow':    () => <FinancialReportsPage initialReport="cashflow" />,
+  'reports/trial':       () => <FinancialReportsPage initialReport="trial" />,
+  'reports/tax':         () => <FinancialReportsPage initialReport="tax" />,
+  'reports/daybook':     () => <FinancialReportsPage initialReport="daybook" />,
+  'reports/ledger':      () => <FinancialReportsPage initialReport="ledger" />,
+  'reports/receivables': () => <FinancialReportsPage initialReport="receivables" />,
+  'reports/payables':    () => <FinancialReportsPage initialReport="payables" />,
+  'reports/uploads':     () => <ReportsPage />,
 
   'reports':              () => <ReportsPage />,
   'settings/credentials': () => <CredentialsPage />,

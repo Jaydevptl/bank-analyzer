@@ -41,6 +41,12 @@ const intercompanyRoutes       = require('./routes/intercompany');
 const salaryRoutes             = require('./routes/salary');
 const tdsRoutes                = require('./routes/tds');
 const gstRoutes                = require('./routes/gst');
+const recurringExpenseRoutes   = require('./routes/recurringExpenses');
+const pettyCashRoutes          = require('./routes/pettyCash');
+const saleReturnRoutes         = require('./routes/saleReturns');
+const documentRoutes           = require('./routes/documents');
+const financialReportRoutes    = require('./routes/financialReports');
+const { optionalAuth }         = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -49,6 +55,7 @@ const PORT = process.env.PORT || 5000;
 app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(optionalAuth); // Phase 18B: parse JWT if present, do NOT enforce
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, process.env.UPLOAD_DIR || 'uploads');
@@ -87,6 +94,11 @@ app.use('/api/intercompany',      intercompanyRoutes);
 app.use('/api/salary',            salaryRoutes);
 app.use('/api/tds',               tdsRoutes);
 app.use('/api/gst',               gstRoutes);
+app.use('/api/recurring-expenses', recurringExpenseRoutes);
+app.use('/api/petty-cash',        pettyCashRoutes);
+app.use('/api/sale-returns',      saleReturnRoutes);
+app.use('/api/documents',         documentRoutes);
+app.use('/api/fin-reports',       financialReportRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

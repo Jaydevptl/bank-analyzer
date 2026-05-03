@@ -475,6 +475,51 @@ export const finoPayGst     = (id, data) => api.post(`/gst/${id}/pay`, data);
 export const finoCancelGst  = (id, reason) => api.delete(`/gst/${id}`, { data: { reason } });
 export const finoGstSummary = (params = {}) => api.get('/gst/summary', { params });
 
+// ─── Fino Phase 17A: Recurring Expenses ──────────────────────────────────────
+
+export const finoListRecurring        = (params = {}) => api.get('/recurring-expenses', { params });
+export const finoCreateRecurring      = (data) => api.post('/recurring-expenses', data);
+export const finoUpdateRecurring      = (id, data) => api.patch(`/recurring-expenses/${id}`, data);
+export const finoDeleteRecurring      = (id, reason) => api.delete(`/recurring-expenses/${id}`, { data: { reason } });
+export const finoGenerateDueRecurring = (data = {}) => api.post('/recurring-expenses/generate-due', data);
+export const finoRecurringSummary     = () => api.get('/recurring-expenses/summary');
+
+// ─── Fino Phase 17B: Petty Cash ──────────────────────────────────────────────
+
+export const finoListPettyCash    = (params = {}) => api.get('/petty-cash', { params });
+export const finoCreatePettyCash  = (data) => api.post('/petty-cash', data);
+export const finoDeletePettyCash  = (id, reason) => api.delete(`/petty-cash/${id}`, { data: { reason } });
+export const finoPettyCashSummary = () => api.get('/petty-cash/summary');
+export const finoStaffPettyCashBalance = (staffId) => api.get(`/petty-cash/staff/${staffId}/balance`);
+
+// ─── Fino Phase 17C: Sale Returns ────────────────────────────────────────────
+
+export const finoListSaleReturns    = (params = {}) => api.get('/sale-returns', { params });
+export const finoCreateSaleReturn   = (data) => api.post('/sale-returns', data);
+export const finoGetSaleReturn      = (id) => api.get(`/sale-returns/${id}`);
+export const finoCancelSaleReturn   = (id, reason) => api.delete(`/sale-returns/${id}`, { data: { reason } });
+export const finoSaleReturnsSummary = () => api.get('/sale-returns/summary');
+
+// ─── Fino Phase 18A: Documents ───────────────────────────────────────────────
+
+export const finoListDocuments   = (params = {}) => api.get('/documents', { params });
+export const finoUploadDocument  = (data) => api.post('/documents', data);
+export const finoGetDocument     = (id) => api.get(`/documents/${id}`);
+export const finoDeleteDocument  = (id) => api.delete(`/documents/${id}`);
+export const finoSearchDocuments = (params = {}) => api.get('/documents/search', { params });
+
+// ─── Fino Phase 19: Financial Reports ────────────────────────────────────────
+
+export const finoReportPL           = (params = {}) => api.get('/fin-reports/profit-loss', { params });
+export const finoReportBalanceSheet = (params = {}) => api.get('/fin-reports/balance-sheet', { params });
+export const finoReportCashFlow     = (params = {}) => api.get('/fin-reports/cash-flow', { params });
+export const finoReportTrialBalance = (params = {}) => api.get('/fin-reports/trial-balance', { params });
+export const finoReportTax          = (params = {}) => api.get('/fin-reports/tax', { params });
+export const finoReportDayBook      = (params = {}) => api.get('/fin-reports/day-book', { params });
+export const finoReportLedger       = (params = {}) => api.get('/fin-reports/ledger', { params });
+export const finoReportReceivables  = (params = {}) => api.get('/fin-reports/receivables', { params });
+export const finoReportPayables     = (params = {}) => api.get('/fin-reports/payables', { params });
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export const exportExcel = (params = {}) => {
