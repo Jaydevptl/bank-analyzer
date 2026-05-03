@@ -28,6 +28,7 @@ import GiftCardsPage      from './components/CashBank/GiftCardsPage';
 import CreditCardsPage    from './components/CashBank/CreditCardsPage';
 import CashConversionsPage from './components/CashBank/CashConversionsPage';
 import StatementUploadPage from './components/BankStatement/StatementUploadPage';
+import ShareMarketPage    from './components/ShareMarket/ShareMarketPage';
 import PartiesPage        from './components/Parties/PartiesPage';
 import ItemsPage          from './components/Items/ItemsPage';
 import SaleInvoicesPage   from './components/Sale/SaleInvoicesPage';
@@ -155,11 +156,11 @@ const VIEW_REGISTRY = {
   'bank-statement/recycle-bin':      () => <RecycleBin />,
   'bank-statement/cash-conversions': () => <Placeholder group="Bank Statement" title="Cash Conversions" />,
 
-  'share-market/holders':   () => <ShareMarket />,
-  'share-market/brokers':   () => <ShareMarket />,
-  'share-market/trades':    () => <ShareMarket />,
-  'share-market/holdings':  () => <ShareMarket />,
-  'share-market/dividends': () => <ShareMarket />,
+  'share-market/holders':   () => <ShareMarketPage />,
+  'share-market/brokers':   () => <ShareMarketPage />,
+  'share-market/trades':    () => <ShareMarketPage />,
+  'share-market/holdings':  () => <ShareMarketPage />,
+  'share-market/dividends': () => <ShareMarketPage />,
 
   'amazon-cards/cards':     () => <Amazon />,
   'amazon-cards/loads':     () => <Amazon />,

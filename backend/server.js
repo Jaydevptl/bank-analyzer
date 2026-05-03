@@ -32,6 +32,7 @@ const saleInvoiceRoutes     = require('./routes/saleInvoices');
 const purchaseInvoiceRoutes = require('./routes/purchaseInvoices');
 const cashConversionRoutes  = require('./routes/cashConversions');
 const statementUploadRoutes = require('./routes/statementUpload');
+const shareMarketRoutes     = require('./routes/shareMarket');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -69,6 +70,7 @@ app.use('/api/sale-invoices',     saleInvoiceRoutes);
 app.use('/api/purchase-invoices', purchaseInvoiceRoutes);
 app.use('/api/cash-conversions', cashConversionRoutes);
 app.use('/api/statement-uploads', statementUploadRoutes);
+app.use('/api/share-market',      shareMarketRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

@@ -271,6 +271,23 @@ export const finoImportUploadTxns   = (id, transactionIds) => api.post(`/stateme
 export const finoSkipUploadTxns     = (id, transactionIds) => api.post(`/statement-uploads/${id}/skip`, { transactionIds });
 export const finoDeleteUpload       = (id, reason) => api.delete(`/statement-uploads/${id}`, { data: { reason } });
 
+// ─── Fino Phase 10: Share Market ─────────────────────────────────────────────
+
+export const finoSmListBrokers     = () => api.get('/share-market/brokers');
+export const finoSmCreateBroker    = (data) => api.post('/share-market/brokers', data);
+export const finoSmListAccounts    = (params = {}) => api.get('/share-market/accounts', { params });
+export const finoSmGetAccount      = (id) => api.get(`/share-market/accounts/${id}`);
+export const finoSmCreateAccount   = (data) => api.post('/share-market/accounts', data);
+export const finoSmDeleteAccount   = (id, reason) => api.delete(`/share-market/accounts/${id}`, { data: { reason } });
+export const finoSmBuy             = (id, data) => api.post(`/share-market/accounts/${id}/buy`, data);
+export const finoSmSell            = (id, data) => api.post(`/share-market/accounts/${id}/sell`, data);
+export const finoSmDividend        = (id, data) => api.post(`/share-market/accounts/${id}/dividend`, data);
+export const finoSmDeleteTxn       = (txnId, reason) => api.delete(`/share-market/transactions/${txnId}`, { data: { reason } });
+export const finoSmUpdatePrice     = (holdingId, currentPrice) => api.post(`/share-market/holdings/${holdingId}/update-price`, { currentPrice });
+export const finoSmBulkUpdatePrices = (updates) => api.post('/share-market/holdings/bulk-update-prices', { updates });
+export const finoSmPnL             = (id, params = {}) => api.get(`/share-market/accounts/${id}/pnl`, { params });
+export const finoSmDashboard       = () => api.get('/share-market/dashboard');
+
 // ─── Fino Phase 3d: Credit Cards ──────────────────────────────────────────────
 
 export const finoListCC          = (params = {}) => api.get('/credit-cards', { params });
