@@ -5,7 +5,7 @@ import {
   finoCancelBill, finoNextBillNumber, finoBillSummary,
   finoMakeBillPayment, finoDeleteBillPayment,
   finoListParties, finoListItems,
-  finoListBanks,
+  finoListBanks, finoListCC,
 } from '../../services/api';
 import EditModal from '../shared/EditModal';
 import DeleteConfirmModal from '../shared/DeleteConfirmModal';
@@ -725,6 +725,7 @@ function PaymentModal({ invoice, onClose, onSaved }) {
   const [ref, setRef]       = useState('');
   const [notes, setNotes]   = useState('');
   const [banks, setBanks]   = useState([]);
+  const [ccs, setCcs]       = useState([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState(null);
 
@@ -732,6 +733,9 @@ function PaymentModal({ invoice, onClose, onSaved }) {
     finoListBanks()
       .then(r => setBanks(Array.isArray(r.data?.accounts) ? r.data.accounts : Array.isArray(r.data?.banks) ? r.data.banks : Array.isArray(r.data) ? r.data : []))
       .catch(() => setBanks([]));
+    finoListCC()
+      .then(r => setCcs(Array.isArray(r.data?.cards) ? r.data.cards : []))
+      .catch(() => setCcs([]));
   }, []);
 
   const submit = async () => {
@@ -740,7 +744,7 @@ function PaymentModal({ invoice, onClose, onSaved }) {
       const amt = Number(amount);
       if (!(amt > 0)) throw new Error('Amount must be > 0');
       if (amt > Number(invoice.balance_due) + 0.001) throw new Error(`Max payable: ${fmt(invoice.balance_due)}`);
-      if (mode !== 'cash' && !paidVia) throw new Error('Select bank account');
+      if (mode !== 'cash' && !paidVia) throw new Error(mode === 'credit_card' ? 'Select credit card' : 'Select bank account');
       await finoMakeBillPayment(invoice.id, {
         paymentDate: date,
         amount: amt,
@@ -780,9 +784,17 @@ function PaymentModal({ invoice, onClose, onSaved }) {
             <option value="cash">Cash</option>
             <option value="upi">UPI</option>
             <option value="cheque">Cheque</option>
+            <option value="credit_card">Credit Card</option>
           </select>
         </Field>
-        {mode !== 'cash' && (
+        {mode === 'credit_card' ? (
+          <Field label="Paid From (Credit Card)">
+            <select className="input" value={paidVia} onChange={e => setPV(e.target.value)}>
+              <option value="">— Select credit card —</option>
+              {(ccs || []).map(c => <option key={c.id} value={c.linked_account_id}>{c.card_label} · {c.bank_name} (out {fmt(c.current_outstanding || 0)})</option>)}
+            </select>
+          </Field>
+        ) : mode !== 'cash' && (
           <Field label="Paid From (Bank)">
             <select className="input" value={paidVia} onChange={e => setPV(e.target.value)}>
               <option value="">— Select bank —</option>

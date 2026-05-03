@@ -283,6 +283,13 @@ export const finoDeleteCcStmt    = (sid, reason) => api.delete(`/credit-cards/st
 
 export const finoCcDashboard     = () => api.get('/credit-cards/summary/dashboard');
 
+// Phase 8: analytics + reconciliation + category
+export const finoCcAnalytics     = (id, params = {}) => api.get(`/credit-cards/${id}/analytics`, { params });
+export const finoCcSetCategory   = (txnId, category) => api.patch(`/credit-cards/transactions/${txnId}/category`, { category });
+export const finoCcReconcile     = (txnId, statementId) => api.post(`/credit-cards/transactions/${txnId}/reconcile`, { statementId });
+export const finoCcUnreconcile   = (txnId) => api.post(`/credit-cards/transactions/${txnId}/unreconcile`);
+export const finoCcStmtReconciliation = (sid) => api.get(`/credit-cards/statements/${sid}/reconciliation`);
+
 // ─── Fino Phase 3c: Gift Cards ────────────────────────────────────────────────
 
 export const finoListGcPlatforms = () => api.get('/gift-cards/platforms');

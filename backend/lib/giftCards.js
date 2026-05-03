@@ -27,6 +27,26 @@ async function coaCodeById(id) {
   return data?.code || null;
 }
 
+// If the COA id belongs to a credit card (code starts with 22), return that card row.
+async function ccByLinkedCoa(coaId) {
+  if (!coaId) return null;
+  const { data, error } = await supabase
+    .from('fino_credit_cards').select('id, current_outstanding, card_label')
+    .eq('linked_account_id', coaId).eq('is_deleted', false).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function bumpCcOutstanding(ccId, delta) {
+  const { data: c } = await supabase.from('fino_credit_cards')
+    .select('current_outstanding').eq('id', ccId).maybeSingle();
+  const newOut = round2(Number(c?.current_outstanding || 0) + Number(delta));
+  await supabase.from('fino_credit_cards')
+    .update({ current_outstanding: newOut, updated_at: new Date().toISOString() })
+    .eq('id', ccId);
+  return newOut;
+}
+
 async function platformCoaForCard(card) {
   // Resolve / lazily create the platform's COA child (e.g. 1601 Gift Cards: Amazon)
   const { data: plat, error } = await supabase
@@ -130,6 +150,26 @@ async function createGiftCard(payload) {
     sourceId: card.id,
     companyId: companyId || null,
   });
+
+  // If paid via a credit card, bump CC outstanding + create a cc_transactions row
+  // so the spend appears in the CC transaction history.
+  if (paidViaCode?.startsWith('22')) {
+    const ccRow = await ccByLinkedCoa(paidViaAccountId);
+    if (ccRow) {
+      await bumpCcOutstanding(ccRow.id, +paid);
+      await supabase.from('fino_cc_transactions').insert({
+        credit_card_id: ccRow.id,
+        txn_date: purchaseDate,
+        amount: paid,
+        description: `Gift Card: ${plat.name} ${cardLabel || ''}`.trim(),
+        txn_type: 'spend',
+        linked_module: 'gift_card_purchase',
+        linked_id: card.id,
+        category: 'Gift Cards',
+        ledger_txn_group_id: ledger.txn_group_id,
+      });
+    }
+  }
 
   return { card, ledger };
 }
@@ -379,8 +419,17 @@ async function deleteGiftCard(id, reason = null) {
   if (!card) throw new Error('Card not found');
   if (card.is_deleted) throw new Error('Already deleted');
 
-  // Reverse purchase
+  // Reverse purchase (also reverses the cc_transactions row's outstanding effect if any)
   try { await reverseBySource({ sourceModule: 'gift_card_purchase', sourceId: id, reason: reason || 'Card deleted' }); } catch (_) {}
+
+  // If purchase was via CC, undo CC outstanding bump + soft-delete the cc_transactions row
+  const { data: ccTxns } = await supabase
+    .from('fino_cc_transactions').select('id, credit_card_id, amount')
+    .eq('linked_module', 'gift_card_purchase').eq('linked_id', id).eq('is_deleted', false);
+  for (const t of (ccTxns || [])) {
+    try { await bumpCcOutstanding(t.credit_card_id, -Number(t.amount)); } catch (_) {}
+    await supabase.from('fino_cc_transactions').update({ is_deleted: true }).eq('id', t.id);
+  }
 
   // Reverse linked usages + transfers
   const { data: usages } = await supabase

@@ -14,6 +14,37 @@ router.delete('/transactions/:txnId', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Phase 8: edit category
+router.patch('/transactions/:txnId/category', async (req, res) => {
+  try { res.json({ txn: await cc.updateTxnCategory(req.params.txnId, req.body?.category || null) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Phase 8: reconciliation
+router.post('/transactions/:txnId/reconcile', async (req, res) => {
+  try { res.json({ txn: await cc.reconcileTransaction(req.params.txnId, req.body?.statementId) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/transactions/:txnId/unreconcile', async (req, res) => {
+  try { res.json({ txn: await cc.unreconcileTransaction(req.params.txnId) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.get('/statements/:statementId/reconciliation', async (req, res) => {
+  try { res.json(await cc.getReconciliationStatus(req.params.statementId)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Phase 8: analytics (must be before /:id)
+router.get('/:id/analytics', async (req, res) => {
+  try {
+    res.json(await cc.getSpendAnalytics({
+      cardId: req.params.id, from: req.query.from || null, to: req.query.to || null,
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 router.delete('/payments/:paymentId', async (req, res) => {
   try { res.json(await cc.deleteCcPayment(req.params.paymentId, req.body?.reason || null)); }
   catch (e) { res.status(400).json({ error: e.message }); }

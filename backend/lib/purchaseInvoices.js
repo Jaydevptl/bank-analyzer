@@ -362,6 +362,14 @@ async function cancelPurchaseInvoice(id, reason = null) {
       const { data: b } = await supabase.from('fino_bank_accounts').select('id').eq('linked_account_id', p.paid_via_account_id).maybeSingle();
       if (b?.id) try { await refreshCurrentBalance(b.id); } catch (_) {}
     }
+    if (p.payment_mode === 'credit_card') {
+      const ccRow = await _ccByLinkedCoa(p.paid_via_account_id);
+      if (ccRow) {
+        try { await _bumpCcOutstanding(ccRow.id, -Number(p.amount)); } catch (_) {}
+        await supabase.from('fino_cc_transactions').update({ is_deleted: true })
+          .eq('linked_module', 'purchase_payment').eq('linked_id', p.id);
+      }
+    }
   }
 
   // Reverse purchase ledger group
@@ -397,6 +405,25 @@ async function _resolvePaymentCoa({ paymentMode, paidViaAccountId }) {
   const code = await coaCodeById(paidViaAccountId);
   if (!code) throw new Error('paid_via_account_id does not resolve to a COA row');
   return { code, accountId: paidViaAccountId };
+}
+
+async function _ccByLinkedCoa(coaId) {
+  if (!coaId) return null;
+  const { data, error } = await supabase
+    .from('fino_credit_cards').select('id, current_outstanding, card_label')
+    .eq('linked_account_id', coaId).eq('is_deleted', false).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function _bumpCcOutstanding(ccId, delta) {
+  const { data: c } = await supabase.from('fino_credit_cards')
+    .select('current_outstanding').eq('id', ccId).maybeSingle();
+  const newOut = round2(Number(c?.current_outstanding || 0) + Number(delta));
+  await supabase.from('fino_credit_cards')
+    .update({ current_outstanding: newOut, updated_at: new Date().toISOString() })
+    .eq('id', ccId);
+  return newOut;
 }
 
 async function recordPayment({
@@ -465,6 +492,25 @@ async function recordPayment({
     if (bank?.id) try { await refreshCurrentBalance(bank.id); } catch (_) {}
   }
 
+  // Credit card payment side-effects: bump CC outstanding + create cc_transactions row
+  if (paymentMode === 'credit_card') {
+    const ccRow = await _ccByLinkedCoa(accountId);
+    if (ccRow) {
+      try { await _bumpCcOutstanding(ccRow.id, +amt); } catch (_) {}
+      await supabase.from('fino_cc_transactions').insert({
+        credit_card_id: ccRow.id,
+        txn_date: paymentDate,
+        amount: amt,
+        description: `Purchase: ${inv.bill_number}`,
+        txn_type: 'spend',
+        linked_module: 'purchase_payment',
+        linked_id: pay.id,
+        category: 'Inventory',
+        ledger_txn_group_id: ledger.txn_group_id,
+      });
+    }
+  }
+
   return { payment: { ...pay, ledger_txn_group_id: ledger.txn_group_id }, ledger, newBalanceDue: Math.max(0, newBal), newStatus };
 }
 
@@ -499,6 +545,16 @@ async function deletePayment(paymentId, reason = null) {
     const { data: bank } = await supabase
       .from('fino_bank_accounts').select('id').eq('linked_account_id', p.paid_via_account_id).maybeSingle();
     if (bank?.id) try { await refreshCurrentBalance(bank.id); } catch (_) {}
+  }
+
+  // CC: undo outstanding bump + soft-delete the cc_transactions row
+  if (p.payment_mode === 'credit_card') {
+    const ccRow = await _ccByLinkedCoa(p.paid_via_account_id);
+    if (ccRow) {
+      try { await _bumpCcOutstanding(ccRow.id, -Number(p.amount)); } catch (_) {}
+      await supabase.from('fino_cc_transactions').update({ is_deleted: true })
+        .eq('linked_module', 'purchase_payment').eq('linked_id', paymentId);
+    }
   }
 
   return { success: true };

@@ -10,6 +10,8 @@ import {
   finoCcStatement, finoUpdateCcStmt, finoDeleteCcStmt,
   finoCcDashboard,
   finoListBanks, finoListParties, finoCreateParty,
+  finoCcAnalytics, finoCcSetCategory,
+  finoCcReconcile, finoCcUnreconcile, finoCcStmtReconciliation,
 } from '../../services/api';
 import EditModal from '../shared/EditModal';
 import DeleteConfirmModal from '../shared/DeleteConfirmModal';
@@ -34,6 +36,11 @@ const TXN_COLORS = {
 };
 const NETWORK_OPTS  = ['visa', 'mastercard', 'amex', 'rupay', 'diners', 'other'];
 const REWARD_OPTS   = ['cashback', 'points', 'miles'];
+const SPEND_CATEGORIES = [
+  'Groceries', 'Ads/Marketing', 'Inventory', 'Travel', 'Fuel',
+  'Dining', 'Utilities', 'Medical', 'Subscriptions', 'Office',
+  'Gift Cards', 'Other',
+];
 const EXPENSE_CODES = [
   { code: '5700', label: 'Misc Expense' },
   { code: '5500', label: 'Marketing / Ads' },
@@ -156,7 +163,10 @@ export default function CreditCardsPage() {
               {cards.length === 0 ? 'Add a credit card to begin.' : 'Select a card on the left.'}
             </div>
           ) : (
-            <CardDetail data={detail} tab={tab} setTab={setTab} onAct={(action) => setModal(action)} />
+            <CardDetail data={detail} tab={tab} setTab={setTab} onAct={(action) => {
+              if (action?.kind === 'reloadDetail') return loadDetail(selId);
+              setModal(action);
+            }} />
           )}
         </section>
       </div>
@@ -327,6 +337,7 @@ function CardDetail({ data, tab, setTab, onAct }) {
           { id: 'statements',   label: `Statements (${statements.length})` },
           { id: 'payments',     label: `Payments (${payments.length})` },
           { id: 'rewards',      label: `Rewards (${rewards.length})` },
+          { id: 'analytics',    label: 'Analytics' },
         ].map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: '6px 12px', border: 'none', cursor: 'pointer',
@@ -341,9 +352,10 @@ function CardDetail({ data, tab, setTab, onAct }) {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
         {tab === 'transactions' && <TransactionsTab rows={transactions} onAct={onAct} />}
-        {tab === 'statements'   && <StatementsTab rows={statements} onAct={onAct} />}
+        {tab === 'statements'   && <StatementsTab rows={statements} transactions={transactions} onAct={onAct} cardId={card.id} />}
         {tab === 'payments'     && <PaymentsTab rows={payments} onAct={onAct} />}
         {tab === 'rewards'      && <RewardsTab rows={rewards} />}
+        {tab === 'analytics'    && <AnalyticsTab cardId={card.id} />}
       </div>
     </>
   );
@@ -351,9 +363,15 @@ function CardDetail({ data, tab, setTab, onAct }) {
 
 function TransactionsTab({ rows, onAct }) {
   if (rows.length === 0) return <Empty>No transactions yet.</Empty>;
+
+  const onChangeCategory = async (txnId, category) => {
+    try { await finoCcSetCategory(txnId, category); onAct({ kind: 'reloadDetail' }); }
+    catch (e) { alert(e?.response?.data?.error || e.message); }
+  };
+
   return (
     <table style={{ width: '100%', fontSize: 12 }}>
-      <thead><Tr h={['Date', 'Description', 'Type', 'Amount', '']} /></thead>
+      <thead><Tr h={['Date', 'Description', 'Type', 'Category', 'Amount', 'Recon', '']} /></thead>
       <tbody>
         {rows.map(r => {
           const tc = TXN_COLORS[r.txn_type] || TXN_COLORS.spend;
@@ -366,8 +384,22 @@ function TransactionsTab({ rows, onAct }) {
                   {r.txn_type}
                 </span>
               </td>
+              <td style={{ padding: 8 }}>
+                {r.txn_type === 'spend' ? (
+                  <select className="input" style={{ fontSize: 11, padding: '2px 6px' }}
+                    value={r.category || 'Other'}
+                    onChange={e => onChangeCategory(r.id, e.target.value)}>
+                    {SPEND_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                ) : <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>—</span>}
+              </td>
               <td style={{ padding: 8, textAlign: 'right', fontWeight: 600, color: tc.c }}>
                 {(['refund','cashback'].includes(r.txn_type) ? '−' : '')}{fmt(r.amount)}
+              </td>
+              <td style={{ padding: 8, textAlign: 'center' }}>
+                {r.is_reconciled
+                  ? <span style={{ fontSize: 11, color: 'var(--success)' }} title="Reconciled">✅</span>
+                  : <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title="Not reconciled">⬜</span>}
               </td>
               <td style={{ padding: 8, textAlign: 'right' }}>
                 <RowMenu items={[
@@ -382,14 +414,17 @@ function TransactionsTab({ rows, onAct }) {
     </table>
   );
 }
-function StatementsTab({ rows, onAct }) {
+function StatementsTab({ rows, transactions, onAct, cardId }) {
+  const [openId, setOpenId] = useState(null);
   if (rows.length === 0) return <Empty>No statements yet.</Empty>;
   return (
+    <>
     <table style={{ width: '100%', fontSize: 12 }}>
-      <thead><Tr h={['Period', 'Stmt Date', 'Due', 'Closing', 'Total Due', 'Paid', 'Status', '']} /></thead>
+      <thead><Tr h={['Period', 'Stmt Date', 'Due', 'Closing', 'Total Due', 'Paid', 'Status', '', '']} /></thead>
       <tbody>
         {rows.map(s => (
-          <tr key={s.id} style={{ borderTop: '1px solid var(--border)' }}>
+          <React.Fragment key={s.id}>
+          <tr style={{ borderTop: '1px solid var(--border)' }}>
             <td style={{ padding: 8 }}>{s.statement_period}</td>
             <td style={{ padding: 8 }}>{s.statement_date}</td>
             <td style={{ padding: 8 }}>{s.due_date}</td>
@@ -406,6 +441,11 @@ function StatementsTab({ rows, onAct }) {
                        s.payment_status === 'partial' ? 'var(--warning)' : 'var(--text-muted)',
               }}>{s.payment_status}</span>
             </td>
+            <td style={{ padding: 8, textAlign: 'center' }}>
+              <button className="btn btn-ghost btn-xs" onClick={() => setOpenId(openId === s.id ? null : s.id)}>
+                {openId === s.id ? 'Hide' : 'Reconcile'}
+              </button>
+            </td>
             <td style={{ padding: 8, textAlign: 'right' }}>
               <RowMenu items={[
                 { label: 'Delete', icon: <Trash2 size={12} />, danger: true,
@@ -413,9 +453,16 @@ function StatementsTab({ rows, onAct }) {
               ]} />
             </td>
           </tr>
+          {openId === s.id && (
+            <tr><td colSpan={9} style={{ padding: 0, background: 'var(--bg-page)' }}>
+              <ReconciliationPanel statement={s} cardId={cardId} onChanged={() => onAct({ kind: 'reloadDetail' })} />
+            </td></tr>
+          )}
+          </React.Fragment>
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 function PaymentsTab({ rows, onAct }) {
@@ -663,6 +710,7 @@ function TxnModal({ kind, card, onClose, onSaved }) {
   const [f, setF] = useState({
     txnDate: today(), amount: '', description: '',
     expenseCategoryCode: kind === 'fee' ? '5220' : '5700',
+    category: 'Other',
     notes: '',
   });
   const [saving, setSaving] = useState(false);
@@ -693,11 +741,20 @@ function TxnModal({ kind, card, onClose, onSaved }) {
       </div>
       <Field label="Description"><input className="input" value={f.description} onChange={e => set('description', e.target.value)} placeholder={isCashback ? 'Cashback credit' : isInterest ? 'Interest charge' : isFee ? 'Annual fee' : 'Merchant / purpose'} /></Field>
       {isExpenseLike && (
-        <Field label="Expense Category">
-          <select className="input" value={f.expenseCategoryCode} onChange={e => set('expenseCategoryCode', e.target.value)}>
-            {EXPENSE_CODES.map(o => <option key={o.code} value={o.code}>{o.label} ({o.code})</option>)}
-          </select>
-        </Field>
+        <>
+          <Field label="Expense Category (Accounting)">
+            <select className="input" value={f.expenseCategoryCode} onChange={e => set('expenseCategoryCode', e.target.value)}>
+              {EXPENSE_CODES.map(o => <option key={o.code} value={o.code}>{o.label} ({o.code})</option>)}
+            </select>
+          </Field>
+          {kind === 'spend' && (
+            <Field label="Spend Category (Analytics)">
+              <select className="input" value={f.category} onChange={e => set('category', e.target.value)}>
+                {SPEND_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+          )}
+        </>
       )}
       <Field label="Notes"><input className="input" value={f.notes} onChange={e => set('notes', e.target.value)} /></Field>
       <Err msg={err} />
@@ -856,3 +913,189 @@ function StatementModal({ card, onClose, onSaved }) {
     </Modal>
   );
 }
+
+// ─── Phase 8: Analytics tab ──────────────────────────────────────────────────
+
+function AnalyticsTab({ cardId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    finoCcAnalytics(cardId)
+      .then(r => setData(r.data))
+      .catch(e => { console.error('[cc] analytics failed:', e); setData(null); })
+      .finally(() => setLoading(false));
+  }, [cardId]);
+
+  if (loading) return <div className="spinner" style={{ margin: '40px auto' }} />;
+  if (!data || data.summary?.txn_count === 0) return <Empty>No spend transactions yet to analyse.</Empty>;
+
+  const { summary, categoryBreakdown, monthlyTrend, topMerchants } = data;
+  const maxMonth = Math.max(1, ...monthlyTrend.map(m => m.total_spend));
+
+  return (
+    <div>
+      {/* Summary */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px,1fr))', gap: 10, marginBottom: 18 }}>
+        <Stat label="Total Spend" value={fmt(summary.total_spend)} />
+        <Stat label="Avg / Month" value={fmt(summary.avg_monthly)} small />
+        <Stat label="Highest Month" value={fmt(summary.highest_month)} small color="var(--danger)" />
+        <Stat label="Spend Count" value={summary.txn_count} small />
+      </div>
+
+      {/* Category breakdown — horizontal bars */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Category Breakdown</div>
+        {categoryBreakdown.map(c => (
+          <div key={c.category} style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+              <span>{c.category} <span style={{ color: 'var(--text-muted)' }}>· {c.count} txn{c.count > 1 ? 's' : ''}</span></span>
+              <span style={{ fontWeight: 600 }}>{fmt(c.total)} ({c.pct}%)</span>
+            </div>
+            <div style={{ height: 6, background: 'var(--bg-page)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${c.pct}%`, height: '100%', background: 'var(--accent)' }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Monthly trend — vertical bars */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Monthly Trend (Spend)</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 120, padding: '0 4px', borderBottom: '1px solid var(--border)' }}>
+          {monthlyTrend.map(m => (
+            <div key={m.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{fmt(m.total_spend).replace('₹', '')}</div>
+              <div style={{ width: '100%', height: `${(m.total_spend / maxMonth) * 100}%`, minHeight: 2, background: 'var(--accent)', borderRadius: '3px 3px 0 0' }} />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{m.month.slice(-2)}/{m.month.slice(2,4)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Top merchants */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Top Merchants</div>
+        <table style={{ width: '100%', fontSize: 12 }}>
+          <thead><Tr h={['#', 'Merchant', 'Count', 'Total']} /></thead>
+          <tbody>
+            {topMerchants.map((m, i) => (
+              <tr key={m.description} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: 6, color: 'var(--text-muted)' }}>{i + 1}</td>
+                <td style={{ padding: 6 }}>{m.description}</td>
+                <td style={{ padding: 6 }}>{m.count}</td>
+                <td style={{ padding: 6, textAlign: 'right', fontWeight: 600 }}>{fmt(m.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Phase 8: Reconciliation panel ───────────────────────────────────────────
+
+function ReconciliationPanel({ statement, cardId, onChanged }) {
+  const [recon, setRecon] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(new Set());
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    finoCcStmtReconciliation(statement.id)
+      .then(r => setRecon(r.data))
+      .catch(e => { console.error('[cc] reconciliation failed:', e); setRecon(null); })
+      .finally(() => setLoading(false));
+  }, [statement.id]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const toggle = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const matchSelected = async () => {
+    for (const id of selected) {
+      try { await finoCcReconcile(id, statement.id); }
+      catch (e) { alert(e?.response?.data?.error || e.message); }
+    }
+    setSelected(new Set());
+    reload(); onChanged?.();
+  };
+  const unmatchSelected = async () => {
+    for (const id of selected) {
+      try { await finoCcUnreconcile(id); } catch (_) {}
+    }
+    setSelected(new Set());
+    reload(); onChanged?.();
+  };
+
+  if (loading) return <div style={{ padding: 14, textAlign: 'center' }}><div className="spinner" /></div>;
+  if (!recon)  return <div style={{ padding: 14, color: 'var(--text-muted)' }}>Failed to load reconciliation.</div>;
+
+  const { matched, unmatched, matched_total, statement_total, difference } = recon;
+  const all = [...matched, ...unmatched].sort((a, b) => String(a.txn_date).localeCompare(String(b.txn_date)));
+
+  return (
+    <div style={{ padding: 14, borderTop: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', gap: 18, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Statement period: <b>{statement.statement_period}</b></div>
+        <div style={{ fontSize: 11 }}>Statement total: <b>{fmt(statement_total)}</b></div>
+        <div style={{ fontSize: 11 }}>Matched: <b style={{ color: 'var(--success)' }}>{fmt(matched_total)}</b></div>
+        <div style={{ fontSize: 11 }}>Difference: <b style={{ color: Math.abs(difference) < 0.01 ? 'var(--success)' : 'var(--warning)' }}>{fmt(difference)}</b></div>
+      </div>
+
+      {all.length === 0 ? (
+        <div style={{ padding: 14, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center' }}>
+          No transactions recorded for this period.
+        </div>
+      ) : (
+        <>
+          <table style={{ width: '100%', fontSize: 11 }}>
+            <thead><Tr h={['', 'Date', 'Description', 'Type', 'Amount', 'Status']} /></thead>
+            <tbody>
+              {all.map(t => {
+                const isMatched = t.is_reconciled && t.reconciled_statement_id === statement.id;
+                return (
+                  <tr key={t.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: 6 }}>
+                      <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} />
+                    </td>
+                    <td style={{ padding: 6 }}>{t.txn_date}</td>
+                    <td style={{ padding: 6 }}>{t.description}</td>
+                    <td style={{ padding: 6 }}>{t.txn_type}</td>
+                    <td style={{ padding: 6, textAlign: 'right' }}>{fmt(t.amount)}</td>
+                    <td style={{ padding: 6 }}>
+                      {isMatched ? <span style={{ color: 'var(--success)' }}>✅ matched</span>
+                                 : <span style={{ color: 'var(--text-muted)' }}>⬜ unmatched</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="btn btn-sm btn-primary" disabled={selected.size === 0} onClick={matchSelected}>
+              Match Selected ({selected.size})
+            </button>
+            <button className="btn btn-sm" disabled={selected.size === 0} onClick={unmatchSelected}>
+              Unmatch Selected
+            </button>
+          </div>
+          {Math.abs(difference) > 0.01 && (
+            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--warning)' }}>
+              ⚠ Difference of {fmt(difference)} — may indicate unrecorded transactions.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+

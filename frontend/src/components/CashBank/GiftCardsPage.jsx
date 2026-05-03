@@ -6,7 +6,7 @@ import {
   finoUpdateGiftCard, finoDeleteGiftCard,
   finoUseGiftCard, finoDeleteGcUsage,
   finoGcTransfer, finoDeleteGcTransfer,
-  finoGcSummary, finoListBanks,
+  finoGcSummary, finoListBanks, finoListCC,
 } from '../../services/api';
 import EditModal from '../shared/EditModal';
 import DeleteConfirmModal from '../shared/DeleteConfirmModal';
@@ -384,6 +384,7 @@ function ErrBox({ msg }) { return msg ? <div style={{ padding: 8, background: 'r
 // ─── New Gift Card Modal ─────────────────────────────────────────────────────
 function NewGiftCardModal({ platforms, onClose, onSaved, onCreatePlatform }) {
   const [banks, setBanks] = useState([]);
+  const [ccs, setCcs] = useState([]);
   const [showAddPlat, setShowAddPlat] = useState(false);
   const [newPlatName, setNewPlatName] = useState('');
   const [newPlatColor, setNewPlatColor] = useState('#888888');
@@ -403,7 +404,9 @@ function NewGiftCardModal({ platforms, onClose, onSaved, onCreatePlatform }) {
     finoListBanks().then(({ data }) => {
       setBanks(data.accounts || []);
       if (data.accounts?.[0]) set('paidViaAccountId', data.accounts[0].linked_account_id);
-    });
+    }).catch(() => setBanks([]));
+    finoListCC().then(({ data }) => setCcs(data.cards || []))
+      .catch(() => setCcs([]));
     if (platforms[0]) set('platformId', platforms[0].id);
   }, []);
 
@@ -473,8 +476,13 @@ function NewGiftCardModal({ platforms, onClose, onSaved, onCreatePlatform }) {
       )}
       <Field label="Paid Via *">
         <select className="input" value={f.paidViaAccountId} onChange={e => set('paidViaAccountId', e.target.value)}>
-          <option value="">— select bank —</option>
-          {banks.map(b => <option key={b.id} value={b.linked_account_id}>{b.account_name} ({b.bank_name})</option>)}
+          <option value="">— select payment source —</option>
+          {banks.length > 0 && <optgroup label="Bank Accounts">
+            {banks.map(b => <option key={b.id} value={b.linked_account_id}>{b.account_name} ({b.bank_name})</option>)}
+          </optgroup>}
+          {ccs.length > 0 && <optgroup label="Credit Cards">
+            {ccs.map(c => <option key={c.id} value={c.linked_account_id}>{c.card_label} · {c.bank_name}</option>)}
+          </optgroup>}
         </select>
       </Field>
       <Field label="Expiry Date (optional)"><input className="input" type="date" value={f.expiryDate} onChange={e => set('expiryDate', e.target.value)} /></Field>

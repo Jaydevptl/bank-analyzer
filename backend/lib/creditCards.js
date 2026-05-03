@@ -187,6 +187,7 @@ async function bumpOutstanding(id, delta) {
 async function recordSpend({
   creditCardId, txnDate, amount, description,
   expenseCategoryCode = DEFAULT_EXPENSE_CODE,
+  category = null,
   linkedModule = null, linkedId = null, businessId = null, notes,
 }) {
   const amt = Number(amount);
@@ -200,6 +201,7 @@ async function recordSpend({
       description: description.trim(), txn_type: 'spend',
       linked_module: linkedModule, linked_id: linkedId,
       expense_category_code: expenseCategoryCode,
+      category: category || 'Other',
       business_id: businessId,
     }).select().single();
   if (error) throw error;
@@ -585,10 +587,206 @@ async function getDashboardSummary() {
   };
 }
 
+// ─── Phase 8: Analytics ──────────────────────────────────────────────────────
+
+async function getSpendAnalytics({ cardId, from = null, to = null } = {}) {
+  if (!cardId) throw new Error('cardId required');
+
+  let q = supabase
+    .from('fino_cc_transactions')
+    .select('id, txn_date, amount, description, txn_type, category, is_deleted')
+    .eq('credit_card_id', cardId)
+    .eq('is_deleted', false);
+  if (from) q = q.gte('txn_date', from);
+  if (to)   q = q.lte('txn_date', to);
+  const { data: txns, error } = await q;
+  if (error) throw error;
+
+  const spendOnly = (txns || []).filter(t => t.txn_type === 'spend');
+
+  // Category breakdown
+  const catMap = new Map();
+  for (const t of spendOnly) {
+    const k = t.category || 'Other';
+    const cur = catMap.get(k) || { category: k, total: 0, count: 0 };
+    cur.total += Number(t.amount); cur.count += 1;
+    catMap.set(k, cur);
+  }
+  const totalSpend = round2(spendOnly.reduce((a, t) => a + Number(t.amount), 0));
+  const categoryBreakdown = [...catMap.values()]
+    .map(c => ({ ...c, total: round2(c.total), pct: totalSpend > 0 ? Math.round(c.total / totalSpend * 1000) / 10 : 0 }))
+    .sort((a, b) => b.total - a.total);
+
+  // Monthly trend (across all txn types)
+  const mMap = new Map();
+  for (const t of (txns || [])) {
+    const month = String(t.txn_date).slice(0, 7);
+    const cur = mMap.get(month) || { month, total_spend: 0, total_cashback: 0, total_payment: 0, total_other: 0 };
+    if (t.txn_type === 'spend')         cur.total_spend    += Number(t.amount);
+    else if (t.txn_type === 'cashback') cur.total_cashback += Number(t.amount);
+    else if (t.txn_type === 'refund')   cur.total_cashback += Number(t.amount);
+    else                                cur.total_other    += Number(t.amount);
+    mMap.set(month, cur);
+  }
+  // Add payments (from cc_payments table) as separate metric
+  let paysQ = supabase.from('fino_cc_payments').select('payment_date, amount').eq('credit_card_id', cardId).eq('is_deleted', false);
+  if (from) paysQ = paysQ.gte('payment_date', from);
+  if (to)   paysQ = paysQ.lte('payment_date', to);
+  const { data: pays } = await paysQ;
+  for (const p of (pays || [])) {
+    const month = String(p.payment_date).slice(0, 7);
+    const cur = mMap.get(month) || { month, total_spend: 0, total_cashback: 0, total_payment: 0, total_other: 0 };
+    cur.total_payment += Number(p.amount);
+    mMap.set(month, cur);
+  }
+  const monthlyTrend = [...mMap.values()]
+    .map(m => ({
+      ...m,
+      total_spend:    round2(m.total_spend),
+      total_cashback: round2(m.total_cashback),
+      total_payment:  round2(m.total_payment),
+      total_other:    round2(m.total_other),
+      net:            round2(m.total_spend - m.total_cashback - m.total_payment),
+    }))
+    .sort((a, b) => a.month.localeCompare(b.month));
+
+  // Top merchants (group by description, spend only)
+  const merchMap = new Map();
+  for (const t of spendOnly) {
+    const k = (t.description || 'Unknown').trim() || 'Unknown';
+    const cur = merchMap.get(k) || { description: k, total: 0, count: 0 };
+    cur.total += Number(t.amount); cur.count += 1;
+    merchMap.set(k, cur);
+  }
+  const topMerchants = [...merchMap.values()]
+    .map(m => ({ ...m, total: round2(m.total) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
+  const months = monthlyTrend.map(m => m.total_spend);
+  const summary = {
+    total_spend: totalSpend,
+    avg_monthly: months.length ? round2(months.reduce((a, x) => a + x, 0) / months.length) : 0,
+    highest_month: months.length ? round2(Math.max(...months)) : 0,
+    lowest_month:  months.length ? round2(Math.min(...months)) : 0,
+    txn_count: spendOnly.length,
+  };
+
+  return { summary, categoryBreakdown, monthlyTrend, topMerchants };
+}
+
+// ─── Phase 8: Statement Reconciliation ───────────────────────────────────────
+
+async function reconcileTransaction(txnId, statementId) {
+  if (!txnId || !statementId) throw new Error('txnId + statementId required');
+  const [txnR, stmtR] = await Promise.all([
+    supabase.from('fino_cc_transactions').select('*').eq('id', txnId).maybeSingle(),
+    supabase.from('fino_cc_statements').select('*').eq('id', statementId).maybeSingle(),
+  ]);
+  if (txnR.error)  throw txnR.error;
+  if (stmtR.error) throw stmtR.error;
+  if (!txnR.data)  throw new Error('Transaction not found');
+  if (!stmtR.data) throw new Error('Statement not found');
+  if (txnR.data.is_deleted)  throw new Error('Transaction is deleted');
+  if (stmtR.data.is_deleted) throw new Error('Statement is deleted');
+  if (txnR.data.credit_card_id !== stmtR.data.credit_card_id) {
+    throw new Error('Transaction and statement belong to different cards');
+  }
+
+  // Validate txn date falls inside statement period (loose check via statement_date and prior month)
+  // Use the statement_period field if present (e.g. "2026-04"); otherwise allow.
+  const period = stmtR.data.statement_period;
+  if (period && /^\d{4}-\d{2}$/.test(period)) {
+    const txnMonth = String(txnR.data.txn_date).slice(0, 7);
+    if (txnMonth !== period) {
+      // Allow but warn — the spec wants reject if outside period
+      throw new Error(`Txn date ${txnR.data.txn_date} is outside statement period ${period}`);
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('fino_cc_transactions').update({
+      is_reconciled: true,
+      reconciled_statement_id: statementId,
+      reconciled_at: new Date().toISOString(),
+    }).eq('id', txnId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function unreconcileTransaction(txnId) {
+  const { data, error } = await supabase
+    .from('fino_cc_transactions').update({
+      is_reconciled: false,
+      reconciled_statement_id: null,
+      reconciled_at: null,
+    }).eq('id', txnId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function getReconciliationStatus(statementId) {
+  const { data: stmt, error } = await supabase
+    .from('fino_cc_statements').select('*').eq('id', statementId).maybeSingle();
+  if (error) throw error;
+  if (!stmt) throw new Error('Statement not found');
+
+  // All non-deleted txns for the same card. Filter to statement period if available.
+  let q = supabase
+    .from('fino_cc_transactions')
+    .select('*')
+    .eq('credit_card_id', stmt.credit_card_id)
+    .eq('is_deleted', false)
+    .order('txn_date', { ascending: true });
+  if (stmt.statement_period && /^\d{4}-\d{2}$/.test(stmt.statement_period)) {
+    const monthStart = `${stmt.statement_period}-01`;
+    const [y, m] = stmt.statement_period.split('-').map(Number);
+    const nextMonth = new Date(y, m, 1);
+    const monthEnd = nextMonth.toISOString().slice(0, 10);
+    q = q.gte('txn_date', monthStart).lt('txn_date', monthEnd);
+  }
+  const { data: txns, error: tErr } = await q;
+  if (tErr) throw tErr;
+
+  const matched   = (txns || []).filter(t => t.is_reconciled && t.reconciled_statement_id === statementId);
+  const unmatched = (txns || []).filter(t => !t.is_reconciled || t.reconciled_statement_id !== statementId);
+
+  // Statement net charge (signed: spends/interest/fees +, refunds/cashback -)
+  const txnNet = (t) => {
+    if (['spend', 'interest', 'fee'].includes(t.txn_type)) return  Number(t.amount);
+    if (['refund', 'cashback'].includes(t.txn_type))       return -Number(t.amount);
+    return 0;
+  };
+  const matchedTotal = round2(matched.reduce((a, t) => a + txnNet(t), 0));
+  const stmtTotal = round2(Number(stmt.closing_balance || 0) - Number(stmt.opening_balance || 0) + Number(stmt.total_payment || 0));
+
+  return {
+    statement: stmt,
+    matched,
+    unmatched,
+    matched_total: matchedTotal,
+    statement_total: stmtTotal,
+    difference: round2(stmtTotal - matchedTotal),
+  };
+}
+
+async function updateTxnCategory(txnId, category) {
+  const { data, error } = await supabase
+    .from('fino_cc_transactions')
+    .update({ category: category || null })
+    .eq('id', txnId).select().single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   createCreditCard, listCreditCards, getCreditCard, updateCardMeta, deleteCreditCard,
   recordSpend, recordRefund, recordCashback, recordRewardPoints, recordInterestOrFee, deleteCcTransaction,
   recordPayment, deleteCcPayment,
   createStatement, updateStatement, deleteStatement, recomputeStatementStatus,
   getDashboardSummary,
+  // Phase 8
+  getSpendAnalytics,
+  reconcileTransaction, unreconcileTransaction, getReconciliationStatus,
+  updateTxnCategory,
 };
