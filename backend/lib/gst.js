@@ -34,6 +34,27 @@ async function _accountCoaCode(accountId) {
   return c2?.code || null;
 }
 
+async function _resolveToCoaId(accountId) {
+  if (!accountId) return null;
+  const { data: ba } = await supabase
+    .from('fino_bank_accounts').select('linked_account_id').eq('id', accountId).maybeSingle();
+  if (ba?.linked_account_id) return ba.linked_account_id;
+  return accountId;
+}
+
+async function _refreshBankByEither(accountId) {
+  if (!accountId) return;
+  try {
+    const { refreshCurrentBalance } = require('./bankAccounts');
+    const { data: byId } = await supabase
+      .from('fino_bank_accounts').select('id').eq('id', accountId).maybeSingle();
+    if (byId?.id) { await refreshCurrentBalance(byId.id); return; }
+    const { data: byLinked } = await supabase
+      .from('fino_bank_accounts').select('id').eq('linked_account_id', accountId).maybeSingle();
+    if (byLinked?.id) await refreshCurrentBalance(byLinked.id);
+  } catch (_) {}
+}
+
 async function recordGstReturn({
   companyId, returnPeriod, returnType,
   totalOutputGst = 0, totalInputGst = 0,
@@ -93,6 +114,7 @@ async function payGst(id, { paymentDate, paymentAmount, paidViaAccountId }) {
 
   const bankCode = await _accountCoaCode(paidViaAccountId);
   if (!bankCode) throw new Error('paidViaAccountId does not resolve to COA');
+  const paidViaCoaId = await _resolveToCoaId(paidViaAccountId);
 
   const ledger = await createLedgerEntryGroup({
     txnDate: paymentDate,
@@ -109,16 +131,12 @@ async function payGst(id, { paymentDate, paymentAmount, paidViaAccountId }) {
   await supabase.from('fino_gst_records').update({
     payment_date: paymentDate,
     payment_amount: amt,
-    paid_via_account_id: paidViaAccountId,
+    paid_via_account_id: paidViaCoaId,
     ledger_txn_group_id: ledger.txn_group_id,
     status: 'paid',
   }).eq('id', id);
 
-  try {
-    const { refreshCurrentBalance } = require('./bankAccounts');
-    const { data: ba } = await supabase.from('fino_bank_accounts').select('id').eq('id', paidViaAccountId).maybeSingle();
-    if (ba?.id) await refreshCurrentBalance(ba.id);
-  } catch (_) {}
+  await _refreshBankByEither(paidViaAccountId);
   return { success: true, ledger };
 }
 
@@ -147,13 +165,8 @@ async function cancelGst(id, reason = null) {
     try { await reverseBySource({ sourceModule: 'gst_payment', sourceId: id, reason: reason || 'GST cancelled' }); } catch (_) {}
   }
   await supabase.from('fino_gst_records').update({ is_deleted: true, status: 'cancelled' }).eq('id', id);
-  if (row.paid_via_account_id) {
-    try {
-      const { refreshCurrentBalance } = require('./bankAccounts');
-      const { data: ba } = await supabase.from('fino_bank_accounts').select('id').eq('id', row.paid_via_account_id).maybeSingle();
-      if (ba?.id) await refreshCurrentBalance(ba.id);
-    } catch (_) {}
-  }
+  // row.paid_via_account_id is now a COA id; helper handles either
+  await _refreshBankByEither(row.paid_via_account_id);
   return { success: true };
 }
 

@@ -62,6 +62,27 @@ async function _accountCoaCode(accountId) {
   return c2?.code || null;
 }
 
+async function _resolveToCoaId(accountId) {
+  if (!accountId) return null;
+  const { data: ba } = await supabase
+    .from('fino_bank_accounts').select('linked_account_id').eq('id', accountId).maybeSingle();
+  if (ba?.linked_account_id) return ba.linked_account_id;
+  return accountId;
+}
+
+async function _refreshBankByEither(accountId) {
+  if (!accountId) return;
+  try {
+    const { refreshCurrentBalance } = require('./bankAccounts');
+    const { data: byId } = await supabase
+      .from('fino_bank_accounts').select('id').eq('id', accountId).maybeSingle();
+    if (byId?.id) { await refreshCurrentBalance(byId.id); return; }
+    const { data: byLinked } = await supabase
+      .from('fino_bank_accounts').select('id').eq('linked_account_id', accountId).maybeSingle();
+    if (byLinked?.id) await refreshCurrentBalance(byLinked.id);
+  } catch (_) {}
+}
+
 async function recordSalary({
   employeePartyId, companyId, salaryMonth, payDate,
   basicSalary, allowances = 0, deductions = 0,
@@ -99,6 +120,7 @@ async function recordSalary({
 
   const bankCode = await _accountCoaCode(paidViaAccountId);
   if (!bankCode) throw new Error('paidViaAccountId does not resolve to COA');
+  const paidViaCoaId = await _resolveToCoaId(paidViaAccountId);
 
   const { data: row, error } = await supabase
     .from('fino_salary_records').insert({
@@ -112,7 +134,7 @@ async function recordSalary({
       tds_deducted: tds,
       pf_deducted: pf,
       net_salary: netSalary,
-      paid_via_account_id: paidViaAccountId,
+      paid_via_account_id: paidViaCoaId,
       notes: notes?.trim() || null,
       status: 'paid',
     }).select().single();
@@ -138,12 +160,8 @@ async function recordSalary({
     .update({ ledger_txn_group_id: ledger.txn_group_id })
     .eq('id', row.id);
 
-  // Refresh bank balance
-  try {
-    const { refreshCurrentBalance } = require('./bankAccounts');
-    const { data: ba } = await supabase.from('fino_bank_accounts').select('id').eq('id', paidViaAccountId).maybeSingle();
-    if (ba?.id) await refreshCurrentBalance(ba.id);
-  } catch (_) {}
+  // Refresh bank balance (input is the bank id from frontend)
+  await _refreshBankByEither(paidViaAccountId);
 
   return { record: row, ledger };
 }
@@ -174,13 +192,8 @@ async function cancelSalary(id, reason = null) {
   }
   await supabase.from('fino_salary_records').update({ is_deleted: true, status: 'cancelled' }).eq('id', id);
 
-  if (row.paid_via_account_id) {
-    try {
-      const { refreshCurrentBalance } = require('./bankAccounts');
-      const { data: ba } = await supabase.from('fino_bank_accounts').select('id').eq('id', row.paid_via_account_id).maybeSingle();
-      if (ba?.id) await refreshCurrentBalance(ba.id);
-    } catch (_) {}
-  }
+  // row.paid_via_account_id is now a COA id; helper handles either
+  await _refreshBankByEither(row.paid_via_account_id);
   return { success: true };
 }
 

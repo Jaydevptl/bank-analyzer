@@ -42,12 +42,27 @@ async function _accountCoaCode(accountId) {
   return c2?.code || null;
 }
 
+// Resolves either a fino_bank_accounts.id OR a fino_chart_of_accounts.id to a
+// COA id (the FK target). Returns null if neither matches.
+async function _resolveToCoaId(accountId) {
+  if (!accountId) return null;
+  const { data: ba } = await supabase
+    .from('fino_bank_accounts').select('linked_account_id').eq('id', accountId).maybeSingle();
+  if (ba?.linked_account_id) return ba.linked_account_id;
+  return accountId; // assume already a COA id
+}
+
+// Refresh a bank balance given either its bank id OR its linked COA id.
 async function _refreshBank(accountId) {
   if (!accountId) return;
   try {
     const { refreshCurrentBalance } = require('./bankAccounts');
-    const { data: ba } = await supabase.from('fino_bank_accounts').select('id').eq('id', accountId).maybeSingle();
-    if (ba?.id) await refreshCurrentBalance(ba.id);
+    const { data: byId } = await supabase
+      .from('fino_bank_accounts').select('id').eq('id', accountId).maybeSingle();
+    if (byId?.id) { await refreshCurrentBalance(byId.id); return; }
+    const { data: byLinked } = await supabase
+      .from('fino_bank_accounts').select('id').eq('linked_account_id', accountId).maybeSingle();
+    if (byLinked?.id) await refreshCurrentBalance(byLinked.id);
   } catch (_) {}
 }
 
@@ -101,6 +116,10 @@ async function createTransfer({
 
   const number = transferNumber?.trim() || await _nextNumber('ICT', 'fino_intercompany_transfers');
 
+  // Resolve bank id → COA id (FK target is fino_chart_of_accounts.id)
+  const fromCoaId = await _resolveToCoaId(fromAccountId);
+  const toCoaId   = toAccountId ? await _resolveToCoaId(toAccountId) : null;
+
   const { data: row, error } = await supabase
     .from('fino_intercompany_transfers').insert({
       transfer_number: number,
@@ -110,8 +129,8 @@ async function createTransfer({
       transfer_type: transferType,
       amount: amt,
       description: description?.trim() || null,
-      from_account_id: fromAccountId,
-      to_account_id:   toAccountId || null,
+      from_account_id: fromCoaId,
+      to_account_id:   toCoaId,
       notes: notes?.trim() || null,
       status: 'completed',
     }).select().single();
@@ -194,6 +213,8 @@ async function recordDrawing({
 
   const number = drawingNumber?.trim() || await _nextNumber('DRW', 'fino_owner_drawings');
 
+  const paidViaCoaId = await _resolveToCoaId(paidViaAccountId);
+
   const { data: row, error } = await supabase
     .from('fino_owner_drawings').insert({
       drawing_number: number,
@@ -203,7 +224,7 @@ async function recordDrawing({
       drawing_type: drawingType,
       amount: amt,
       description: description?.trim() || null,
-      paid_via_account_id: paidViaAccountId,
+      paid_via_account_id: paidViaCoaId,
       notes: notes?.trim() || null,
     }).select().single();
   if (error) throw error;
