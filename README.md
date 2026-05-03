@@ -1,6 +1,6 @@
-# BankLens
+# Fino
 
-A local-only personal finance analyzer for Indian banks and stock brokers. Parses bank statements (CSV/XLSX/PDF) and broker tradebooks, calculates dashboards, P&L, charges and holdings — all stored in your own Supabase instance.
+A local-only personal Financial OS for Indian banks, brokers, cards and businesses. Parses bank statements (CSV/XLSX/PDF) and broker tradebooks, tracks Amazon card purchases, calculates dashboards, P&L, charges and holdings — all stored in your own Supabase instance.
 
 ## Features
 

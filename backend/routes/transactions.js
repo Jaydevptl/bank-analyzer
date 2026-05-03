@@ -20,7 +20,7 @@ const { fromDb, toDbField } = require('../lib/mapper');
 router.get('/', async (req, res) => {
   try {
     const {
-      startDate, endDate, bank, minAmount, maxAmount,
+      startDate, endDate, bank, accountHolder, minAmount, maxAmount,
       category, search, type, status,
       page = 1, limit = 100,
       sortBy = 'date', sortOrder = 'asc',
@@ -40,6 +40,7 @@ router.get('/', async (req, res) => {
     if (startDate) query = query.gte('date', new Date(startDate).toISOString());
     if (endDate)   query = query.lte('date', new Date(endDate + 'T23:59:59').toISOString());
     if (bank && bank !== 'all') query = query.eq('bank_name', bank);
+    if (accountHolder && accountHolder !== 'all') query = query.eq('account_holder', accountHolder);
     if (category && category !== 'all') query = query.eq('category', category);
     if (search) query = query.ilike('description', `%${search}%`);
     if (type === 'debit')  query = query.gt('debit', 0);
@@ -152,6 +153,184 @@ router.get('/banks', async (req, res) => {
   }
 });
 
+// ─── Distinct Account Holders ─────────────────────────────────────────────────
+
+router.get('/account-holders', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('account_holder')
+      .in('status', ['pending', 'verified']);
+    if (error) throw error;
+
+    const holders = [...new Set(data.map(r => r.account_holder))].filter(Boolean);
+    res.json({ accountHolders: holders });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Duplicate Check Helper (mirrors upload pipeline) ────────────────────────
+
+async function findDuplicate(txn) {
+  const dateStr = typeof txn.date === 'string' ? txn.date : new Date(txn.date).toISOString();
+  const dateOnly = dateStr.substring(0, 10);
+
+  let query = supabase
+    .from('transactions')
+    .select('id, description, debit, credit, status')
+    .gte('date', dateOnly + 'T00:00:00')
+    .lte('date', dateOnly + 'T23:59:59')
+    .in('status', ['pending', 'verified', 'backup']);
+
+  if (txn.debit > 0)       query = query.eq('debit', txn.debit);
+  else if (txn.credit > 0) query = query.eq('credit', txn.credit);
+
+  const { data, error } = await query;
+  if (error || !data || data.length === 0) return null;
+
+  const prefix = (txn.description || '').substring(0, 20).toLowerCase();
+  for (const ex of data) {
+    if ((ex.description || '').substring(0, 20).toLowerCase() === prefix) return ex.id;
+  }
+  return null;
+}
+
+function buildManualRow(e, sessionId) {
+  const isoDate = new Date(e.date).toISOString();
+  return {
+    date: isoDate,
+    description: String(e.description).trim(),
+    debit:  Number(e.debit)  || 0,
+    credit: Number(e.credit) || 0,
+    balance: null,
+    bank_name: (e.bankName || 'Cash').trim(),
+    account_number: '',
+    account_name: '',
+    account_holder: (e.accountHolder || '').trim(),
+    reference_no: (e.referenceNo || '').trim(),
+    upload_id: sessionId,
+    upload_session_id: sessionId,
+    source_file: sessionId === 'manual-bulk' ? 'Manual Bulk Upload' : 'Manual Entry',
+    category: e.category || 'Uncategorized',
+    raw_data: { manual: true, bulk: sessionId === 'manual-bulk' },
+  };
+}
+
+// ─── Create Single Transaction (manual entry — same flow as bank upload) ─────
+
+router.post('/', async (req, res) => {
+  try {
+    const { date, description, debit, credit } = req.body;
+    if (!date || !description) {
+      return res.status(400).json({ error: 'date and description are required' });
+    }
+    const debitNum  = Number(debit)  || 0;
+    const creditNum = Number(credit) || 0;
+    if (debitNum <= 0 && creditNum <= 0) {
+      return res.status(400).json({ error: 'Either debit or credit must be greater than 0' });
+    }
+
+    const sessionId = `manual_${Date.now()}`;
+    const base = buildManualRow(req.body, 'manual');
+    base.upload_session_id = sessionId;
+
+    // Duplicate check against existing pending/verified/backup
+    const dupId = await findDuplicate({ ...base, debit: base.debit, credit: base.credit });
+
+    if (dupId) {
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert({ ...base, status: 'duplicate', duplicate_of: dupId })
+        .select().single();
+      if (error) throw error;
+      return res.json({ transaction: fromDb(data), status: 'duplicate', matchedWith: dupId });
+    }
+
+    // Single manual add → backup + pending dono insert (bulk flow ki tarah)
+    const { error: bErr } = await supabase
+      .from('transactions')
+      .insert({ ...base, status: 'backup' });
+    if (bErr) throw bErr;
+
+    const { data: pending, error: pErr } = await supabase
+      .from('transactions')
+      .insert({ ...base, status: 'pending' })
+      .select().single();
+    if (pErr) throw pErr;
+
+    res.json({ transaction: fromDb(pending), status: 'pending' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Bulk Insert (manual entries from template — same flow as bank upload) ───
+
+router.post('/bulk', async (req, res) => {
+  try {
+    const { entries } = req.body;
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'entries array required' });
+    }
+    if (entries.length > 5000) {
+      return res.status(400).json({ error: 'Max 5000 entries per upload' });
+    }
+
+    const sessionId = `manual-bulk_${Date.now()}`;
+    const errors = [];
+    const toInsert = [];
+    let unique = 0, duplicates = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const lineNo = i + 1;
+      if (!e.date || !e.description) {
+        errors.push({ line: lineNo, error: 'date and description required' }); continue;
+      }
+      const dt = new Date(e.date);
+      if (isNaN(dt.getTime())) {
+        errors.push({ line: lineNo, error: `invalid date: ${e.date}` }); continue;
+      }
+      const debit  = Number(e.debit)  || 0;
+      const credit = Number(e.credit) || 0;
+      if (debit <= 0 && credit <= 0) {
+        errors.push({ line: lineNo, error: 'debit or credit must be > 0' }); continue;
+      }
+
+      const base = buildManualRow(e, 'manual-bulk');
+      base.upload_session_id = sessionId;
+
+      const dupId = await findDuplicate(base);
+      if (dupId) {
+        toInsert.push({ ...base, status: 'duplicate', duplicate_of: dupId });
+        duplicates++;
+      } else {
+        toInsert.push({ ...base, status: 'backup' });
+        toInsert.push({ ...base, status: 'pending' });
+        unique++;
+      }
+    }
+
+    let inserted = 0;
+    for (let i = 0; i < toInsert.length; i += 500) {
+      const slice = toInsert.slice(i, i + 500);
+      const { data, error } = await supabase.from('transactions').insert(slice).select('id');
+      if (error) throw error;
+      inserted += (data?.length || 0);
+    }
+
+    res.json({
+      total: entries.length,
+      unique, duplicates,
+      inserted,
+      errors,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Verify All Pending ───────────────────────────────────────────────────────
 
 router.patch('/verify-all', async (req, res) => {
@@ -184,6 +363,32 @@ router.patch('/:id/verify', async (req, res) => {
 
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Transaction not found or already verified' });
+
+    // Ensure a backup copy exists for this entry (manual single-add entries
+    // don't have backup yet; bulk/file-uploaded entries already do).
+    try {
+      const dateStr = typeof data.date === 'string' ? data.date : new Date(data.date).toISOString();
+      const dateOnly = dateStr.substring(0, 10);
+      let bq = supabase.from('transactions').select('id, description').eq('status', 'backup')
+        .gte('date', dateOnly + 'T00:00:00').lte('date', dateOnly + 'T23:59:59');
+      if (data.debit > 0) bq = bq.eq('debit', data.debit);
+      else bq = bq.eq('credit', data.credit);
+
+      const { data: backups } = await bq;
+      const prefix = (data.description || '').substring(0, 20).toLowerCase();
+      const hasBackup = (backups || []).some(b => (b.description || '').substring(0, 20).toLowerCase() === prefix);
+
+      if (!hasBackup) {
+        const backupRow = { ...data };
+        delete backupRow.id;
+        delete backupRow.created_at;
+        delete backupRow.updated_at;
+        backupRow.status = 'backup';
+        await supabase.from('transactions').insert(backupRow);
+      }
+    } catch (backupErr) {
+      console.error('Backup creation on verify failed:', backupErr.message);
+    }
 
     res.json({ transaction: fromDb(data) });
   } catch (err) {

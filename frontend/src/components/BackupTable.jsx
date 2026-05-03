@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  ChevronLeft, ChevronRight, RefreshCw, Search,
+  ChevronLeft, ChevronRight, RefreshCw, Search, X,
   ArrowUp, ArrowDown, ChevronsUpDown, ShieldCheck, Download, FileSpreadsheet, RotateCcw, Trash2
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { getTransactions, exportExcel, exportPDF, restoreFromBackup, deleteTransaction } from '../services/api';
+import { getTransactions, getBanks, getAccountHolders, exportExcel, exportPDF, restoreFromBackup, deleteTransaction } from '../services/api';
 
 const fmtNum = (n) => n ? new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) : '-';
+
+const CATEGORIES = [
+  'Salary', 'Amazon / E-commerce', 'Supplier Payment', 'Logistics',
+  'Utilities', 'Advertising', 'Transfer', 'Fixed Deposit', 'Personal',
+  'UPI Payment', 'Bank Charges', 'Interest', 'Tax / GST', 'Rent', 'Loan', 'Uncategorized',
+];
 
 const INIT_COLUMNS = [
   { key: 'date',          label: 'Date',        width: 100 },
@@ -22,9 +28,17 @@ const INIT_COLUMNS = [
 
 export default function BackupTable() {
   const [transactions, setTransactions] = useState([]);
+  const [banks, setBanks] = useState([]);
+  const [accountHolders, setAccountHolders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 });
   const [search, setSearch] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [bank, setBank] = useState('all');
+  const [accountHolder, setAccountHolder] = useState('all');
+  const [category, setCategory] = useState('all');
+  const [type, setType] = useState('all');
   const [sortBy, setSortBy] = useState('date');
   const [sortOrder, setSortOrder] = useState('desc');
   const [columns, setColumns] = useState(INIT_COLUMNS);
@@ -75,14 +89,24 @@ export default function BackupTable() {
     try {
       const params = { page, limit: pagination.limit, sortBy, sortOrder, status: 'backup' };
       if (search) params.search = search;
+      if (startDate) params.startDate = startDate;
+      if (endDate) params.endDate = endDate;
+      if (bank !== 'all') params.bank = bank;
+      if (accountHolder !== 'all') params.accountHolder = accountHolder;
+      if (category !== 'all') params.category = category;
+      if (type !== 'all') params.type = type;
       const { data } = await getTransactions(params);
       setTransactions(data.transactions);
       setPagination(data.pagination);
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [search, sortBy, sortOrder, pagination.limit]);
+  }, [search, startDate, endDate, bank, accountHolder, category, type, sortBy, sortOrder, pagination.limit]);
 
-  useEffect(() => { load(1); }, [search, sortBy, sortOrder]);
+  useEffect(() => { load(1); }, [search, startDate, endDate, bank, accountHolder, category, type, sortBy, sortOrder]);
+  useEffect(() => {
+    getBanks().then(({ data }) => setBanks(data.banks)).catch(() => {});
+    getAccountHolders().then(({ data }) => setAccountHolders(data.accountHolders)).catch(() => {});
+  }, []);
 
   const handleSort = (col) => {
     if (sortBy === col) setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -177,12 +201,36 @@ export default function BackupTable() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Filters */}
       <div className="filter-bar">
-        <div style={{ position: 'relative', maxWidth: 300 }}>
+        <div style={{ position: 'relative', maxWidth: 220 }}>
           <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="input" placeholder="Search backup transactions..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
+          <input className="input" placeholder="Search descriptions..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 32 }} />
         </div>
+        <input className="input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ maxWidth: 150 }} />
+        <input className="input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ maxWidth: 150 }} />
+        <select className="input" value={bank} onChange={(e) => setBank(e.target.value)} style={{ maxWidth: 160 }}>
+          <option value="all">All Banks</option>
+          {banks.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select className="input" value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)} style={{ maxWidth: 180 }}>
+          <option value="all">All Accounts</option>
+          {accountHolders.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select className="input" value={category} onChange={(e) => setCategory(e.target.value)} style={{ maxWidth: 160 }}>
+          <option value="all">All Categories</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select className="input" value={type} onChange={(e) => setType(e.target.value)} style={{ maxWidth: 120 }}>
+          <option value="all">All Types</option>
+          <option value="debit">Debit</option>
+          <option value="credit">Credit</option>
+        </select>
+        {(search || startDate || endDate || bank !== 'all' || accountHolder !== 'all' || category !== 'all' || type !== 'all') && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setStartDate(''); setEndDate(''); setBank('all'); setAccountHolder('all'); setCategory('all'); setType('all'); }}>
+            <X size={13} /> Clear
+          </button>
+        )}
         <button className="btn btn-ghost btn-sm" onClick={() => load(1)} disabled={loading}>
           <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Refresh
         </button>

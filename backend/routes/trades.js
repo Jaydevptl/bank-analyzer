@@ -1,13 +1,6 @@
 /**
- * Trades Route
- * POST   /api/trades/upload     - Upload broker statements
- * GET    /api/trades             - List trades with filters
- * GET    /api/trades/summary     - Period summary with KPIs
- * GET    /api/trades/pnl         - FIFO P&L per symbol
- * GET    /api/trades/charges     - Charges breakdown
- * GET    /api/trades/holdings    - Current holdings
- * GET    /api/trades/reports     - Upload reports
- * DELETE /api/trades/clear       - Clear all trades
+ * Share Market Route - Upload, Overview, Accounts
+ * Handles Ledger + P&L Excel file uploads with per-account tracking.
  */
 
 const express = require('express');
@@ -15,16 +8,11 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-
-const { parseTradeCSV } = require('../services/parsers/tradeCsvParser');
-const { parseTradeXLSXAsync } = require('../services/parsers/tradeXlsxParser');
-const { detectBroker, extractAccountHolder, extractAccountId } = require('../services/brokerDetector');
-const { normalizeTradeRow } = require('../services/brokerNormalizer');
-const { calculatePnL, calculateHoldings, getMonthlyPnL, getQuarterlyPnL, aggregatePnL } = require('../services/pnlCalculator');
+const crypto = require('crypto');
 const supabase = require('../lib/supabase');
-const { fromDbTrade, toDbTrade, fromDbTradeReport, toDbTradeField } = require('../lib/tradeMapper');
+const { parseExcel } = require('../services/parsers/tradeXlsxParser');
 
-// ─── Multer Setup ──────────────────────────────────────────────────────────────
+// ─── Multer Setup ────────────────────────────────────────────────────────────
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '..', 'uploads')),
@@ -35,202 +23,422 @@ const storage = multer.diskStorage({
   },
 });
 
-const fileFilter = (req, file, cb) => {
-  const allowed = ['.csv', '.xlsx', '.xls'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  allowed.includes(ext) ? cb(null, true) : cb(new Error(`File type "${ext}" not supported.`), false);
-};
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    ['.csv', '.xlsx', '.xls'].includes(ext) ? cb(null, true) : cb(new Error(`Unsupported: ${ext}`), false);
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: 50 * 1024 * 1024 } });
+// ─── Helper: flexible column getter ─────────────────────────────────────────
 
-// ─── Upload Trades ────────────────────────────────────────────────────────────
+function getCol(row, names) {
+  const keys = Object.keys(row);
+  // Pass 1: exact match (lowercase)
+  for (const n of names) {
+    const key = keys.find(k => k.toLowerCase().trim() === n.toLowerCase());
+    if (key && row[key] !== undefined && String(row[key]).trim() !== '') return row[key];
+  }
+  // Pass 2: substring match (e.g. "VoucherDate" contains "date")
+  for (const n of names) {
+    const key = keys.find(k => k.toLowerCase().includes(n.toLowerCase()));
+    if (key && row[key] !== undefined && String(row[key]).trim() !== '') return row[key];
+  }
+  return null;
+}
+
+function parseNum(val) {
+  if (!val) return 0;
+  return parseFloat(String(val).replace(/[₹,\s()]/g, '')) || 0;
+}
+
+function parseDate(val) {
+  if (!val) return null;
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// ─── Upload Files ────────────────────────────────────────────────────────────
 
 router.post('/upload', upload.array('files', 20), async (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ error: 'No files uploaded.' });
   }
 
-  const uploadId = `tradeup_${Date.now()}`;
-  const fileReports = [];
-  const globalErrors = [];
-  let totalImported = 0;
-  let totalBrokerage = 0;
-  let totalSTT = 0;
-  let totalCharges = 0;
-  let totalBuyValue = 0;
-  let totalSellValue = 0;
+  let fileMeta = {};
+  try { fileMeta = JSON.parse(req.body.fileMeta || '{}'); } catch {}
+
+  const results = [];
 
   for (const file of req.files) {
+    const meta = fileMeta[file.originalname] || {};
+    const accountName = (meta.accountName || '').trim();
+    const fileType = meta.fileType || 'auto'; // 'ledger', 'pnl', 'auto'
+
     const report = {
       fileName: file.originalname,
-      broker: 'Unknown',
-      accountHolder: '',
-      accountId: '',
-      totalTrades: 0,
-      buyTrades: 0,
-      sellTrades: 0,
-      totalBrokerage: 0,
-      totalSTT: 0,
-      totalOtherCharges: 0,
-      errors: 0,
-      errorDetails: [],
+      accountName,
+      fileType,
+      entries: 0,
+      errors: [],
     };
 
     try {
-      const ext = path.extname(file.originalname).toLowerCase();
-      let rows = [], rawContent = '';
+      const { rows, headers, detectedType } = await parseExcel(file.path, []);
 
-      if (ext === '.csv') {
-        ({ rows, rawContent } = parseTradeCSV(file.path));
-      } else {
-        ({ rows, rawContent } = await parseTradeXLSXAsync(file.path, []));
+      // Resolve file type
+      const resolvedType = fileType !== 'auto' ? fileType
+        : detectedType === 'ledger' ? 'ledger'
+        : detectedType === 'pnl' ? 'pnl'
+        : /ledger/i.test(file.originalname) ? 'ledger' : 'pnl';
+
+      report.fileType = resolvedType;
+      report.headers = headers;
+
+      // Ensure account exists
+      if (accountName) {
+        await supabase.from('stock_accounts').upsert(
+          { account_name: accountName, updated_at: new Date().toISOString() },
+          { onConflict: 'account_name', ignoreDuplicates: false }
+        );
       }
 
-      const brokerInfo = detectBroker(rawContent || rows.map(r => Object.values(r).join(',')).join('\n'));
-      const brokerKey = brokerInfo?.key || 'UNKNOWN';
-      const brokerName = brokerInfo?.name || 'Unknown';
-      const columnMap = brokerInfo?.columnMap || null;
-      const accountHolder = extractAccountHolder(rawContent || '');
-      const accountId = extractAccountId(rawContent || '');
+      // Add debug info: headers + first 3 rows
+      report.debug = {
+        headers,
+        detectedType,
+        sampleRows: rows.slice(0, 3).map(r => {
+          const obj = {};
+          Object.keys(r).forEach(k => { obj[k] = r[k]; });
+          return obj;
+        }),
+        totalRawRows: rows.length,
+      };
 
-      report.broker = brokerName;
-      report.accountHolder = accountHolder;
-      report.accountId = accountId;
+      if (resolvedType === 'ledger') {
+        // ─── LEDGER ──────────────────────────────────────────────────────
+        const ledgerRows = [];
+        for (const row of rows) {
+          try {
+            const dateVal = getCol(row, ['date', 'tran date', 'trade date', 'voucher date', 'value date', 'posting date', 'transaction date', 'entry date']);
+            const descVal = getCol(row, ['particulars', 'description', 'narration', 'remarks', 'details', 'voucher narration', 'transaction']);
+            const debitVal = getCol(row, ['debit', 'dr', 'debit amount']);
+            const creditVal = getCol(row, ['credit', 'cr', 'credit amount']);
+            const amtVal = getCol(row, ['amount', 'net amount', 'value']);
+            const balVal = getCol(row, ['balance', 'closing balance', 'running balance', 'bal']);
 
-      const tradesToInsert = [];
+            const parsedDate = parseDate(dateVal);
+            if (!parsedDate) continue;
 
-      for (const row of rows) {
-        try {
-          const result = normalizeTradeRow(row, brokerKey, columnMap);
-          if (!result) continue;
+            const debit = parseNum(debitVal);
+            const credit = parseNum(creditVal);
+            let amount = 0;
+            let isOutflow = false;
 
-          // 5Paisa returns array, others return object
-          const trades = Array.isArray(result) ? result : [result];
-
-          for (const trade of trades) {
-            tradesToInsert.push({
-              ...trade,
-              broker: brokerName,
-              accountId,
-              accountHolder,
-              uploadId,
-              sourceFile: file.originalname,
-              rawData: row,
-            });
-
-            report.totalTrades++;
-            if (trade.type === 'BUY') {
-              report.buyTrades++;
-              totalBuyValue += trade.amount;
+            if (debit > 0 || credit > 0) {
+              // Separate debit/credit columns
+              amount = debit > 0 ? debit : credit;
+              isOutflow = debit > 0;
             } else {
-              report.sellTrades++;
-              totalSellValue += trade.amount;
+              // Single amount column (Manthan style: negative = outflow, positive = inflow)
+              const raw = parseFloat(String(amtVal || '0').replace(/[₹,\s]/g, '')) || 0;
+              amount = Math.abs(raw);
+              isOutflow = raw < 0;
             }
-            report.totalBrokerage += trade.brokerage;
-            report.totalSTT += trade.stt;
-            report.totalOtherCharges += (trade.gst + trade.sebiCharges + trade.stampDuty + trade.exchangeCharges);
 
-            totalBrokerage += trade.brokerage;
-            totalSTT += trade.stt;
-            totalCharges += trade.totalCharges;
-          }
-        } catch (err) {
-          report.errors++;
-          report.errorDetails.push(`Row error: ${err.message}`);
-        }
-      }
+            const balance = parseNum(balVal);
+            if (amount === 0 && balance === 0) continue;
 
-      if (tradesToInsert.length > 0) {
-        const CHUNK = 500;
-        for (let i = 0; i < tradesToInsert.length; i += CHUNK) {
-          const chunk = tradesToInsert.slice(i, i + CHUNK).map(toDbTrade);
-          const { error } = await supabase.from('trades').insert(chunk);
-          if (error) {
-            report.errors++;
-            report.errorDetails.push(`DB insert error: ${error.message}`);
-            throw new Error(`DB insert failed: ${error.message}`);
-          }
+            // Classify entry type from description + Manthan Category column
+            const desc = String(descVal || '').toLowerCase();
+            const category = String(getCol(row, ['category', 'type', 'vouchertype', 'voucher type']) || '').toLowerCase();
+            let entryType = 'Other';
+
+            if (/deposit|payin|pay.?in|fund.*in|received/i.test(desc)) entryType = 'Deposit';
+            else if (/withdraw|payout|pay.?out|fund.*out/i.test(desc)) entryType = 'Withdrawal';
+            else if (/dividend/i.test(desc)) entryType = 'Dividend';
+            else if (/brokerage|commission|charge|fee|turnover/i.test(desc)) entryType = 'Charges';
+            else if (/\bstt\b|tax|gst|tds|stamp/i.test(desc)) entryType = 'Tax';
+            else if (/interest/i.test(desc)) entryType = 'Interest';
+            else if (/trade.*bill|bill.*posted/i.test(desc) || category === 'trades') entryType = isOutflow ? 'Trade Loss' : 'Trade Profit';
+            else if (/fund.*transfer|bank.*transfer|neft|rtgs|imps/i.test(desc)) entryType = isOutflow ? 'Withdrawal' : 'Deposit';
+            else if (isOutflow) entryType = 'Withdrawal';
+            else entryType = 'Deposit';
+
+            ledgerRows.push({
+              entry_date: parsedDate.toISOString(),
+              account_name: accountName,
+              entry_type: entryType,
+              description: String(descVal || ''),
+              amount,
+              balance,
+              source_file: file.originalname,
+              raw_data: row,
+            });
+          } catch {}
         }
-        totalImported += tradesToInsert.length;
+
+        if (ledgerRows.length > 0) {
+          const CHUNK = 500;
+          for (let i = 0; i < ledgerRows.length; i += CHUNK) {
+            const { error } = await supabase.from('ledger_entries').insert(ledgerRows.slice(i, i + CHUNK));
+            if (error) throw new Error(`Ledger insert failed: ${error.message}`);
+          }
+          report.entries = ledgerRows.length;
+        } else {
+          report.errors.push('No valid ledger entries found.');
+        }
+
       } else {
-        throw new Error(`No valid trades found in "${file.originalname}".`);
+        // ─── P&L (Transaction-wise) ──────────────────────────────────────
+        const pnlRows = [];
+        for (const row of rows) {
+          try {
+            // Flexible column mapping for P&L
+            const symbol = getCol(row, ['script', 'script name', 'scriptname', 'symbol', 'symbol name', 'tradingsymbol', 'scrip', 'scrip name', 'stock', 'fullname', 'shortname', 'instrument']);
+            const buyDate = getCol(row, ['buy date', 'buydate', 'purchase date', 'buy_date']);
+            const sellDate = getCol(row, ['sell date', 'selldate', 'sale date', 'sell_date']);
+            const buyRate = getCol(row, ['buy rate', 'buyrate', 'buy price', 'purchase price', 'buy_rate', 'purchase_rate', 'avg buy price']);
+            const sellRate = getCol(row, ['sell rate', 'sellrate', 'sell price', 'sale price', 'sell_rate', 'sale_rate', 'avg sell price']);
+            const qty = getCol(row, ['qty', 'quantity', 'delivqty', 'net qty', 'buy qty', 'sell qty', 'units']);
+            const pnlVal = getCol(row, ['profit', 'loss', 'p&l', 'pnl', 'profit/loss', 'gainloss', 'gain/loss', 'net p&l', 'realized p&l', 'realised p&l', 'shorttermgainloss', 'longtermgainloss']);
+            const buyValue = getCol(row, ['buy value', 'purchase value', 'purchase_value', 'buy amount', 'cost']);
+            const sellValue = getCol(row, ['sell value', 'sale value', 'sale_value', 'sell amount', 'proceeds']);
+
+            const parsedBuyDate = parseDate(buyDate);
+            const parsedSellDate = parseDate(sellDate);
+            const parsedPnL = parseFloat(String(pnlVal || '0').replace(/[₹,\s]/g, '')) || 0;
+
+            // Need at least a P&L value or dates to be a valid row
+            if (parsedPnL === 0 && !parsedBuyDate && !parsedSellDate) continue;
+
+            const parsedQty = parseNum(qty);
+            const parsedBuyRate = parseNum(buyRate);
+            const parsedSellRate = parseNum(sellRate);
+            const parsedBuyValue = parseNum(buyValue) || (parsedQty * parsedBuyRate);
+            const parsedSellValue = parseNum(sellValue) || (parsedQty * parsedSellRate);
+
+            pnlRows.push({
+              account_name: accountName,
+              symbol: symbol ? String(symbol).trim() : '-',
+              buy_date: parsedBuyDate ? parsedBuyDate.toISOString() : null,
+              sell_date: parsedSellDate ? parsedSellDate.toISOString() : null,
+              quantity: parsedQty,
+              buy_rate: parsedBuyRate,
+              sell_rate: parsedSellRate,
+              buy_value: +parsedBuyValue.toFixed(2),
+              sell_value: +parsedSellValue.toFixed(2),
+              pnl: +parsedPnL.toFixed(2),
+              source_file: file.originalname,
+              raw_data: row,
+            });
+          } catch {}
+        }
+
+        if (pnlRows.length > 0) {
+          const CHUNK = 500;
+          for (let i = 0; i < pnlRows.length; i += CHUNK) {
+            const { error } = await supabase.from('trade_pnl').insert(pnlRows.slice(i, i + CHUNK));
+            if (error) throw new Error(`P&L insert failed: ${error.message}`);
+          }
+          report.entries = pnlRows.length;
+        } else {
+          report.errors.push('No valid P&L entries found.');
+        }
       }
 
-      fileReports.push(report);
+      results.push(report);
     } catch (err) {
-      globalErrors.push({ file: file.originalname, error: err.message });
-      report.errors++;
-      report.errorDetails.push(err.message);
-      fileReports.push(report);
+      report.errors.push(err.message);
+      results.push(report);
     } finally {
       try { fs.unlinkSync(file.path); } catch {}
     }
   }
 
-  const summary = {
-    totalTrades: totalImported,
-    totalBrokerage: +totalBrokerage.toFixed(2),
-    totalSTT: +totalSTT.toFixed(2),
-    totalCharges: +totalCharges.toFixed(2),
-    totalBuyValue: +totalBuyValue.toFixed(2),
-    totalSellValue: +totalSellValue.toFixed(2),
-  };
-
-  // Save report
-  await supabase.from('trade_upload_reports').insert({
-    upload_id: uploadId,
-    files: fileReports,
-    summary,
-  });
-
-  res.json({
-    success: true,
-    uploadId,
-    summary,
-    files: fileReports,
-    errors: globalErrors,
-  });
+  res.json({ success: true, files: results });
 });
 
-// ─── List Trades ──────────────────────────────────────────────────────────────
+// ─── Accounts List ───────────────────────────────────────────────────────────
 
-router.get('/', async (req, res) => {
+router.get('/accounts', async (req, res) => {
   try {
-    const {
-      broker, symbol, segment, type, accountId,
-      startDate, endDate,
-      page = 1, limit = 100,
-      sortBy = 'tradeDate', sortOrder = 'desc',
-    } = req.query;
-
-    let query = supabase.from('trades').select('*', { count: 'exact' });
-
-    if (broker && broker !== 'all') query = query.eq('broker', broker);
-    if (symbol) query = query.ilike('symbol', `%${symbol}%`);
-    if (segment && segment !== 'all') query = query.eq('segment', segment);
-    if (type && type !== 'all') query = query.eq('type', type);
-    if (accountId) query = query.eq('account_id', accountId);
-    if (startDate) query = query.gte('trade_date', new Date(startDate).toISOString());
-    if (endDate) query = query.lte('trade_date', new Date(endDate + 'T23:59:59').toISOString());
-
-    const dbField = toDbTradeField(sortBy);
-    query = query.order(dbField, { ascending: sortOrder !== 'desc' });
-
-    const pageNum = parseInt(page);
-    const pageSize = parseInt(limit);
-    const from = (pageNum - 1) * pageSize;
-    query = query.range(from, from + pageSize - 1);
-
-    const { data, error, count } = await query;
+    const { data, error } = await supabase
+      .from('stock_accounts')
+      .select('*')
+      .order('account_name', { ascending: true });
     if (error) throw error;
+    res.json({ accounts: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Overview: Per-account P&L + Ledger summary ─────────────────────────────
+
+router.get('/overview', async (req, res) => {
+  try {
+    // Fetch all P&L entries (table may not exist yet — graceful fallback)
+    let pnlData = [];
+    try {
+      const { data, error } = await supabase
+        .from('trade_pnl')
+        .select('account_name, symbol, pnl, buy_value, sell_value');
+      if (!error) pnlData = data || [];
+    } catch {}
+
+    // Fetch all ledger entries
+    const { data: ledgerData, error: ledgerErr } = await supabase
+      .from('ledger_entries')
+      .select('account_name, entry_type, amount, balance, entry_date');
+    if (ledgerErr) throw ledgerErr;
+
+    // Fetch accounts
+    const { data: accounts, error: accErr } = await supabase
+      .from('stock_accounts')
+      .select('*')
+      .order('account_name', { ascending: true });
+    if (accErr) throw accErr;
+
+    // Build per-account summary
+    const accountSummaries = (accounts || []).map(acc => {
+      const name = acc.account_name;
+
+      // P&L summary
+      const acPnl = (pnlData || []).filter(r => r.account_name === name);
+      const totalProfit = acPnl.filter(r => r.pnl > 0).reduce((s, r) => s + r.pnl, 0);
+      const totalLoss = acPnl.filter(r => r.pnl < 0).reduce((s, r) => s + r.pnl, 0);
+      const netPnL = acPnl.reduce((s, r) => s + r.pnl, 0);
+      const totalBuyValue = acPnl.reduce((s, r) => s + (r.buy_value || 0), 0);
+      const totalSellValue = acPnl.reduce((s, r) => s + (r.sell_value || 0), 0);
+      const totalTrades = acPnl.length;
+
+      // Ledger summary
+      const acLedger = (ledgerData || []).filter(r => r.account_name === name);
+      const totalDeposits = acLedger.filter(r => r.entry_type === 'Deposit').reduce((s, r) => s + r.amount, 0);
+      const totalWithdrawals = acLedger.filter(r => r.entry_type === 'Withdrawal').reduce((s, r) => s + r.amount, 0);
+      const totalCharges = acLedger.filter(r => ['Charges', 'Tax'].includes(r.entry_type)).reduce((s, r) => s + r.amount, 0);
+      const tradeProfit = acLedger.filter(r => r.entry_type === 'Trade Profit').reduce((s, r) => s + r.amount, 0);
+      const tradeLoss = acLedger.filter(r => r.entry_type === 'Trade Loss').reduce((s, r) => s + r.amount, 0);
+
+      // Current balance: latest ledger entry with non-zero balance
+      const withBalance = acLedger.filter(r => r.balance > 0).sort((a, b) => new Date(b.entry_date) - new Date(a.entry_date));
+      const currentBalance = withBalance.length > 0 ? withBalance[0].balance : 0;
+
+      // Combined P&L: from trade_pnl table + from ledger Trade Profit/Loss entries
+      const combinedProfit = totalProfit + tradeProfit;
+      const combinedLoss = totalLoss + tradeLoss;
+      const combinedNetPnL = netPnL + tradeProfit - tradeLoss;
+
+      return {
+        accountName: name,
+        broker: acc.broker || '-',
+        // P&L (combined from pnl table + ledger trade entries)
+        totalProfit: +combinedProfit.toFixed(2),
+        totalLoss: +combinedLoss.toFixed(2),
+        netPnL: +combinedNetPnL.toFixed(2),
+        totalBuyValue: +totalBuyValue.toFixed(2),
+        totalSellValue: +totalSellValue.toFixed(2),
+        totalTrades,
+        tradeProfit: +tradeProfit.toFixed(2),
+        tradeLoss: +tradeLoss.toFixed(2),
+        // Ledger
+        totalDeposits: +totalDeposits.toFixed(2),
+        totalWithdrawals: +totalWithdrawals.toFixed(2),
+        totalCharges: +totalCharges.toFixed(2),
+        currentBalance: +currentBalance.toFixed(2),
+        netFund: +(totalDeposits - totalWithdrawals).toFixed(2),
+        ledgerEntries: acLedger.length,
+      };
+    });
+
+    // Overall totals
+    const overall = {
+      totalProfit: +accountSummaries.reduce((s, a) => s + a.totalProfit, 0).toFixed(2),
+      totalLoss: +accountSummaries.reduce((s, a) => s + a.totalLoss, 0).toFixed(2),
+      netPnL: +accountSummaries.reduce((s, a) => s + a.netPnL, 0).toFixed(2),
+      totalDeposits: +accountSummaries.reduce((s, a) => s + a.totalDeposits, 0).toFixed(2),
+      totalWithdrawals: +accountSummaries.reduce((s, a) => s + a.totalWithdrawals, 0).toFixed(2),
+      totalAccounts: accountSummaries.length,
+    };
+
+    res.json({ accounts: accountSummaries, overall });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Day-wise P&L ────────────────────────────────────────────────────────────
+
+router.get('/daywise-pnl', async (req, res) => {
+  try {
+    const { accountName } = req.query;
+
+    // Fetch from trade_pnl table
+    let pnlEntries = [];
+    try {
+      let q = supabase.from('trade_pnl').select('sell_date, pnl');
+      if (accountName && accountName !== 'all') q = q.eq('account_name', accountName);
+      const { data, error } = await q;
+      if (!error) pnlEntries = data || [];
+    } catch {}
+
+    // Also include Trade Profit/Loss from ledger
+    let ledgerTradeEntries = [];
+    {
+      let q = supabase.from('ledger_entries').select('entry_date, entry_type, amount');
+      if (accountName && accountName !== 'all') q = q.eq('account_name', accountName);
+      q = q.in('entry_type', ['Trade Profit', 'Trade Loss']);
+      const { data, error } = await q;
+      if (!error) ledgerTradeEntries = data || [];
+    }
+
+    // Group by date
+    const dayMap = {};
+
+    // From trade_pnl
+    for (const entry of pnlEntries) {
+      const dateKey = entry.sell_date ? new Date(entry.sell_date).toISOString().slice(0, 10) : 'unknown';
+      if (!dayMap[dateKey]) dayMap[dateKey] = { date: dateKey, profit: 0, loss: 0, trades: 0 };
+      dayMap[dateKey].trades++;
+      if (entry.pnl >= 0) dayMap[dateKey].profit += entry.pnl;
+      else dayMap[dateKey].loss += Math.abs(entry.pnl);
+    }
+
+    // From ledger trade entries
+    for (const entry of ledgerTradeEntries) {
+      const dateKey = entry.entry_date ? new Date(entry.entry_date).toISOString().slice(0, 10) : 'unknown';
+      if (!dayMap[dateKey]) dayMap[dateKey] = { date: dateKey, profit: 0, loss: 0, trades: 0 };
+      dayMap[dateKey].trades++;
+      if (entry.entry_type === 'Trade Profit') dayMap[dateKey].profit += entry.amount;
+      else dayMap[dateKey].loss += entry.amount;
+    }
+
+    // Convert to sorted array
+    const days = Object.values(dayMap)
+      .map(d => ({
+        ...d,
+        profit: +d.profit.toFixed(2),
+        loss: +d.loss.toFixed(2),
+        net: +(d.profit - d.loss).toFixed(2),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date)); // newest first
+
+    // Totals
+    const totalProfit = days.reduce((s, d) => s + d.profit, 0);
+    const totalLoss = days.reduce((s, d) => s + d.loss, 0);
 
     res.json({
-      trades: data.map(fromDbTrade),
-      pagination: {
-        page: pageNum,
-        limit: pageSize,
-        total: count,
-        pages: Math.ceil(count / pageSize),
+      days,
+      totals: {
+        totalProfit: +totalProfit.toFixed(2),
+        totalLoss: +totalLoss.toFixed(2),
+        netPnL: +(totalProfit - totalLoss).toFixed(2),
+        totalDays: days.length,
+        profitDays: days.filter(d => d.net > 0).length,
+        lossDays: days.filter(d => d.net < 0).length,
       },
     });
   } catch (err) {
@@ -238,339 +446,73 @@ router.get('/', async (req, res) => {
   }
 });
 
-// ─── Helper: fetch all trades with filters ──────────────────────────────────
-
-async function fetchAllTrades(query) {
-  const { startDate, endDate, broker, accountId } = query;
-  let q = supabase.from('trades').select('*');
-  if (startDate) q = q.gte('trade_date', new Date(startDate).toISOString());
-  if (endDate) q = q.lte('trade_date', new Date(endDate + 'T23:59:59').toISOString());
-  if (broker && broker !== 'all') q = q.eq('broker', broker);
-  if (accountId) q = q.eq('account_id', accountId);
-  q = q.order('trade_date', { ascending: true });
-
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data || []).map(fromDbTrade);
-}
-
-// ─── Summary (period KPIs) ────────────────────────────────────────────────────
-
-router.get('/summary', async (req, res) => {
-  try {
-    const { period = 'all', date, broker, accountId } = req.query;
-
-    // Determine date range based on period
-    let startDate, endDate, label;
-    const now = date ? new Date(date) : new Date();
-
-    if (period === 'day') {
-      startDate = new Date(now); startDate.setHours(0, 0, 0, 0);
-      endDate = new Date(now); endDate.setHours(23, 59, 59, 999);
-      label = startDate.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
-    } else if (period === 'month') {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-      endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-      label = startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    } else if (period === 'quarter') {
-      const m = now.getMonth();
-      const qStart = m - (m % 3);
-      startDate = new Date(now.getFullYear(), qStart, 1);
-      endDate = new Date(now.getFullYear(), qStart + 3, 0, 23, 59, 59);
-      label = `Q${Math.floor(qStart / 3) + 1} ${now.getFullYear()}`;
-    } else if (period === 'year') {
-      startDate = new Date(now.getFullYear(), 0, 1);
-      endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59);
-      label = String(now.getFullYear());
-    } else {
-      startDate = null;
-      endDate = null;
-      label = 'All Time';
-    }
-
-    let q = supabase.from('trades').select('*');
-    if (startDate) q = q.gte('trade_date', startDate.toISOString());
-    if (endDate) q = q.lte('trade_date', endDate.toISOString());
-    if (broker && broker !== 'all') q = q.eq('broker', broker);
-    if (accountId) q = q.eq('account_id', accountId);
-
-    const { data: rawTrades, error } = await q;
-    if (error) throw error;
-    const trades = (rawTrades || []).map(fromDbTrade);
-
-    // For accurate P&L, calculate using ALL historical trades up to endDate (FIFO needs full history)
-    let allHistoricalQ = supabase.from('trades').select('*');
-    if (endDate) allHistoricalQ = allHistoricalQ.lte('trade_date', endDate.toISOString());
-    if (broker && broker !== 'all') allHistoricalQ = allHistoricalQ.eq('broker', broker);
-    if (accountId) allHistoricalQ = allHistoricalQ.eq('account_id', accountId);
-    const { data: histRaw } = await allHistoricalQ;
-    const histTrades = (histRaw || []).map(fromDbTrade);
-    const allPnL = calculatePnL(histTrades);
-
-    // Filter symbol-pnl to only show those with sells in the period
-    const symbolsWithSellInPeriod = new Set(
-      trades.filter(t => t.type === 'SELL').map(t => t.symbol)
-    );
-    const periodPnL = allPnL.filter(p => symbolsWithSellInPeriod.has(p.symbol));
-
-    const totalBuyValue = trades.filter(t => t.type === 'BUY').reduce((s, t) => s + t.amount, 0);
-    const totalSellValue = trades.filter(t => t.type === 'SELL').reduce((s, t) => s + t.amount, 0);
-    const totalBrokerage = trades.reduce((s, t) => s + t.brokerage, 0);
-    const totalSTT = trades.reduce((s, t) => s + t.stt, 0);
-    const totalGST = trades.reduce((s, t) => s + t.gst, 0);
-    const totalOtherCharges = trades.reduce((s, t) => s + t.sebiCharges + t.stampDuty + t.exchangeCharges + t.otherCharges, 0);
-    const totalAllCharges = trades.reduce((s, t) => s + t.totalCharges, 0);
-    const totalRealizedPnL = periodPnL.reduce((s, p) => s + p.realizedPnL, 0);
-    const netPnL = totalRealizedPnL;
-
-    const profitTrades = periodPnL.filter(p => p.realizedPnL > 0).length;
-    const lossTrades = periodPnL.filter(p => p.realizedPnL < 0).length;
-
-    const sortedByPnL = periodPnL.slice().sort((a, b) => b.realizedPnL - a.realizedPnL);
-    const topGainers = sortedByPnL.slice(0, 5).map(p => ({ symbol: p.symbol, pnl: p.realizedPnL }));
-    const topLosers = sortedByPnL.slice(-5).reverse().map(p => ({ symbol: p.symbol, pnl: p.realizedPnL }));
-
-    // By Segment
-    const segMap = {};
-    trades.forEach(t => {
-      if (!segMap[t.segment]) segMap[t.segment] = { segment: t.segment, pnl: 0, charges: 0, trades: 0 };
-      segMap[t.segment].charges += t.totalCharges;
-      segMap[t.segment].trades++;
-    });
-    periodPnL.forEach(p => {
-      // Need segment info - skip for now or attribute by first trade
-      const sample = trades.find(t => t.symbol === p.symbol);
-      if (sample && segMap[sample.segment]) {
-        segMap[sample.segment].pnl += p.realizedPnL;
-      }
-    });
-    const bySegment = Object.values(segMap);
-
-    // By Broker
-    const brokerMap = {};
-    trades.forEach(t => {
-      if (!brokerMap[t.broker]) brokerMap[t.broker] = { broker: t.broker, trades: 0, totalValue: 0, charges: 0, pnl: 0 };
-      brokerMap[t.broker].trades++;
-      brokerMap[t.broker].totalValue += t.amount;
-      brokerMap[t.broker].charges += t.totalCharges;
-    });
-    periodPnL.forEach(p => {
-      const sample = trades.find(t => t.symbol === p.symbol);
-      if (sample && brokerMap[sample.broker]) {
-        brokerMap[sample.broker].pnl += p.realizedPnL;
-      }
-    });
-    const byBroker = Object.values(brokerMap);
-
-    res.json({
-      period: label,
-      totalBuyValue: +totalBuyValue.toFixed(2),
-      totalSellValue: +totalSellValue.toFixed(2),
-      totalRealizedPnL: +totalRealizedPnL.toFixed(2),
-      totalBrokerage: +totalBrokerage.toFixed(2),
-      totalSTT: +totalSTT.toFixed(2),
-      totalGST: +totalGST.toFixed(2),
-      totalOtherCharges: +totalOtherCharges.toFixed(2),
-      totalAllCharges: +totalAllCharges.toFixed(2),
-      netPnL: +netPnL.toFixed(2),
-      totalTrades: trades.length,
-      profitTrades,
-      lossTrades,
-      winRate: periodPnL.length > 0 ? +((profitTrades / periodPnL.length) * 100).toFixed(1) : 0,
-      topGainers,
-      topLosers,
-      bySegment,
-      byBroker,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Detailed P&L (per symbol with FIFO) ──────────────────────────────────────
+// ─── P&L Entries (with filters) ──────────────────────────────────────────────
 
 router.get('/pnl', async (req, res) => {
   try {
-    const { startDate, endDate, pnlType } = req.query;
-    const trades = await fetchAllTrades(req.query);
-    let pnl = calculatePnL(trades);
+    const { accountName, symbol, page = 1, limit = 100 } = req.query;
+    const pg = parseInt(page);
+    const lim = parseInt(limit);
 
-    if (pnlType === 'STCG') pnl = pnl.filter(p => p.stcgPnL !== 0);
-    else if (pnlType === 'LTCG') pnl = pnl.filter(p => p.ltcgPnL !== 0);
-
-    // Also generate monthly and quarterly views
-    const monthly = [];
-    const quarterly = [];
-    const tradesByDate = trades.reduce((acc, t) => {
-      const d = new Date(t.tradeDate);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(t);
-      return acc;
-    }, {});
-
-    Object.keys(tradesByDate).sort().forEach(key => {
-      const [year, month] = key.split('-').map(Number);
-      monthly.push(getMonthlyPnL(trades, year, month));
-    });
-
-    // Quarterly (Indian FY)
-    const fyMap = {};
-    trades.forEach(t => {
-      const d = new Date(t.tradeDate);
-      const m = d.getMonth() + 1;
-      const fy = m >= 4 ? d.getFullYear() : d.getFullYear() - 1;
-      const q = m >= 4 && m <= 6 ? 1 : m >= 7 && m <= 9 ? 2 : m >= 10 && m <= 12 ? 3 : 4;
-      const key = `${fy}-Q${q}`;
-      if (!fyMap[key]) fyMap[key] = { fy, q };
-    });
-    Object.values(fyMap).forEach(({ fy, q }) => {
-      quarterly.push(getQuarterlyPnL(trades, fy, q));
-    });
-
-    res.json({ symbolPnL: pnl, monthly, quarterly });
+    // trade_pnl table may not exist yet
+    try {
+      let q = supabase.from('trade_pnl').select('*', { count: 'exact' });
+      if (accountName && accountName !== 'all') q = q.eq('account_name', accountName);
+      if (symbol) q = q.ilike('symbol', `%${symbol}%`);
+      q = q.order('sell_date', { ascending: false, nullsFirst: false });
+      q = q.range((pg - 1) * lim, pg * lim - 1);
+      const { data, error, count } = await q;
+      if (error) throw error;
+      return res.json({
+        entries: data || [],
+        pagination: { page: pg, limit: lim, total: count, pages: Math.ceil(count / lim) },
+      });
+    } catch {
+      return res.json({ entries: [], pagination: { page: pg, limit: lim, total: 0, pages: 0 } });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Charges Breakdown ────────────────────────────────────────────────────────
+// ─── Ledger Entries (with filters) ───────────────────────────────────────────
 
-router.get('/charges', async (req, res) => {
+router.get('/ledger', async (req, res) => {
   try {
-    const trades = await fetchAllTrades(req.query);
+    const { accountName, entryType, page = 1, limit = 100 } = req.query;
+    let q = supabase.from('ledger_entries').select('*', { count: 'exact' });
 
-    const totalBrokerage = trades.reduce((s, t) => s + t.brokerage, 0);
-    const totalSTT = trades.reduce((s, t) => s + t.stt, 0);
-    const totalGST = trades.reduce((s, t) => s + t.gst, 0);
-    const totalStampDuty = trades.reduce((s, t) => s + t.stampDuty, 0);
-    const totalSEBI = trades.reduce((s, t) => s + t.sebiCharges, 0);
-    const totalExchange = trades.reduce((s, t) => s + t.exchangeCharges, 0);
-    const totalOther = trades.reduce((s, t) => s + t.otherCharges, 0);
-    const grandTotal = trades.reduce((s, t) => s + t.totalCharges, 0);
+    if (accountName && accountName !== 'all') q = q.eq('account_name', accountName);
+    if (entryType && entryType !== 'all') q = q.eq('entry_type', entryType);
+    q = q.order('entry_date', { ascending: false });
 
-    // By Broker
-    const brokerMap = {};
-    trades.forEach(t => {
-      if (!brokerMap[t.broker]) brokerMap[t.broker] = { broker: t.broker, brokerage: 0, stt: 0, gst: 0, stampDuty: 0, total: 0 };
-      brokerMap[t.broker].brokerage += t.brokerage;
-      brokerMap[t.broker].stt += t.stt;
-      brokerMap[t.broker].gst += t.gst;
-      brokerMap[t.broker].stampDuty += t.stampDuty;
-      brokerMap[t.broker].total += t.totalCharges;
-    });
+    const pg = parseInt(page);
+    const lim = parseInt(limit);
+    q = q.range((pg - 1) * lim, pg * lim - 1);
 
-    // By Month
-    const monthMap = {};
-    trades.forEach(t => {
-      const d = new Date(t.tradeDate);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (!monthMap[key]) monthMap[key] = { month: key, brokerage: 0, stt: 0, gst: 0, total: 0 };
-      monthMap[key].brokerage += t.brokerage;
-      monthMap[key].stt += t.stt;
-      monthMap[key].gst += t.gst;
-      monthMap[key].total += t.totalCharges;
-    });
-
-    // By Segment
-    const segMap = {};
-    trades.forEach(t => {
-      if (!segMap[t.segment]) segMap[t.segment] = { segment: t.segment, brokerage: 0, stt: 0, gst: 0, total: 0 };
-      segMap[t.segment].brokerage += t.brokerage;
-      segMap[t.segment].stt += t.stt;
-      segMap[t.segment].gst += t.gst;
-      segMap[t.segment].total += t.totalCharges;
-    });
+    const { data, error, count } = await q;
+    if (error) throw error;
 
     res.json({
-      totalBrokerage: +totalBrokerage.toFixed(2),
-      totalSTT: +totalSTT.toFixed(2),
-      totalGST: +totalGST.toFixed(2),
-      totalStampDuty: +totalStampDuty.toFixed(2),
-      totalSEBI: +totalSEBI.toFixed(2),
-      totalExchange: +totalExchange.toFixed(2),
-      totalOther: +totalOther.toFixed(2),
-      grandTotal: +grandTotal.toFixed(2),
-      byBroker: Object.values(brokerMap),
-      byMonth: Object.values(monthMap).sort((a, b) => a.month.localeCompare(b.month)),
-      bySegment: Object.values(segMap),
+      entries: data || [],
+      pagination: { page: pg, limit: lim, total: count, pages: Math.ceil(count / lim) },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Holdings ────────────────────────────────────────────────────────────────
-
-router.get('/holdings', async (req, res) => {
-  try {
-    const trades = await fetchAllTrades(req.query);
-    const holdings = calculateHoldings(trades);
-
-    // Add broker and account from trade data
-    const enriched = holdings.map(h => {
-      const sample = trades.filter(t => t.symbol === h.symbol && t.type === 'BUY').slice(-1)[0];
-      return {
-        ...h,
-        broker: sample?.broker || '',
-        accountHolder: sample?.accountHolder || '',
-        accountId: sample?.accountId || '',
-      };
-    });
-
-    res.json({
-      holdings: enriched,
-      totalSymbols: enriched.length,
-      totalInvested: +enriched.reduce((s, h) => s + h.totalInvested, 0).toFixed(2),
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Reports ────────────────────────────────────────────────────────────────
-
-router.get('/reports', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('trade_upload_reports')
-      .select('*')
-      .order('uploaded_at', { ascending: false });
-
-    if (error) throw error;
-    res.json({ reports: (data || []).map(fromDbTradeReport) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Distinct Brokers ────────────────────────────────────────────────────────
-
-router.get('/brokers', async (req, res) => {
-  try {
-    const { data, error } = await supabase.from('trades').select('broker');
-    if (error) throw error;
-    const brokers = [...new Set((data || []).map(r => r.broker))].filter(Boolean);
-    res.json({ brokers });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Clear All Trades ────────────────────────────────────────────────────────
+// ─── Clear All ───────────────────────────────────────────────────────────────
 
 router.delete('/clear', async (req, res) => {
   try {
-    const { count, error } = await supabase
-      .from('trades')
-      .delete({ count: 'exact' })
-      .gte('created_at', '1970-01-01');
-
-    if (error) throw error;
-
-    await supabase.from('trade_upload_reports').delete().gte('created_at', '1970-01-01');
-
-    res.json({ deleted: count, message: 'All trades and reports cleared.' });
+    // trade_pnl may not exist yet — ignore errors
+    try { await supabase.from('trade_pnl').delete().neq('id', '00000000-0000-0000-0000-000000000000'); } catch {}
+    const { error: e2 } = await supabase.from('ledger_entries').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    const { error: e3 } = await supabase.from('stock_accounts').delete().neq('account_name', '');
+    if (e2) throw e2;
+    if (e3) throw e3;
+    res.json({ message: 'All share market data cleared.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

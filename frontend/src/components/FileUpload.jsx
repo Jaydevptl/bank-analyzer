@@ -1,9 +1,11 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   Upload, FileText, X, CheckCircle2, AlertCircle,
-  Loader2, CloudUpload, FileSpreadsheet, ChevronDown, ChevronUp, Download
+  Loader2, CloudUpload, FileSpreadsheet, ChevronDown, ChevronUp, Download,
+  Wallet, Plus
 } from 'lucide-react';
 import { uploadFiles } from '../services/api';
+import { AddCashModal, BulkCashUploadModal } from './CashModals';
 
 const getFileIcon = (name) => {
   const ext = name.split('.').pop().toLowerCase();
@@ -27,6 +29,8 @@ export default function FileUpload({ onSuccess }) {
   const [error, setError]         = useState(null);
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [showAddCash, setShowAddCash] = useState(false);
+  const [showBulkCash, setShowBulkCash] = useState(false);
   const inputRef                  = useRef(null);
 
   const onDragOver  = (e) => { e.preventDefault(); setDragging(true); };
@@ -72,6 +76,36 @@ export default function FileUpload({ onSuccess }) {
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto' }} className="animate-fade-in">
+
+      {/* Cash Entries (manual) */}
+      <div className="card" style={{
+        padding: 16, marginBottom: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 12, flexWrap: 'wrap',
+      }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 8, background: 'rgba(240,201,58,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Wallet size={18} color="var(--accent)" />
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Cash Entries</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              Manually add single entry ya CSV bulk upload — pending mein jayegi, baaki bank ki tarah hi.
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-sm" onClick={() => setShowAddCash(true)}>
+            <Plus size={13} /> Single Entry
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowBulkCash(true)}>
+            <Upload size={13} /> Bulk CSV
+          </button>
+        </div>
+      </div>
 
       {/* Drop Zone */}
       <div
@@ -279,6 +313,20 @@ export default function FileUpload({ onSuccess }) {
           <span key={b} className="badge badge-muted">{b}</span>
         ))}
       </div>
+
+      {/* Cash modals */}
+      {showAddCash && (
+        <AddCashModal
+          onClose={() => setShowAddCash(false)}
+          onSaved={() => { setShowAddCash(false); onSuccess?.(); }}
+        />
+      )}
+      {showBulkCash && (
+        <BulkCashUploadModal
+          onClose={() => setShowBulkCash(false)}
+          onDone={() => { setShowBulkCash(false); onSuccess?.(); }}
+        />
+      )}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
-  getTransactions, getBanks, updateTransaction,
+  getTransactions, getBanks, getAccountHolders, updateTransaction,
   exportExcel, exportPDF, clearAllTransactions,
   verifyTransaction, verifyAll, deleteTransaction, undoTransaction,
   getRecycleBin, restoreRecycleItem
@@ -93,6 +93,7 @@ function DescriptionCell({ txn, onUpdate }) {
 export default function MainTable() {
   const [transactions, setTransactions] = useState([]);
   const [banks, setBanks] = useState([]);
+  const [accountHolders, setAccountHolders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 });
   const [columns, setColumns] = useState(INIT_COLUMNS);
@@ -101,6 +102,7 @@ export default function MainTable() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [bank, setBank] = useState('all');
+  const [accountHolder, setAccountHolder] = useState('all');
   const [category, setCategory] = useState('all');
   const [type, setType] = useState('all');
   const [sortBy, setSortBy] = useState('date');
@@ -144,6 +146,7 @@ export default function MainTable() {
       if (startDate) params.startDate = startDate;
       if (endDate) params.endDate = endDate;
       if (bank !== 'all') params.bank = bank;
+      if (accountHolder !== 'all') params.accountHolder = accountHolder;
       if (category !== 'all') params.category = category;
       if (type !== 'all') params.type = type;
       const { data } = await getTransactions(params);
@@ -152,10 +155,13 @@ export default function MainTable() {
       setSelectedIds(new Set());
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [search, startDate, endDate, bank, category, type, sortBy, sortOrder, pagination.limit]);
+  }, [search, startDate, endDate, bank, accountHolder, category, type, sortBy, sortOrder, pagination.limit]);
 
-  useEffect(() => { load(1); }, [search, startDate, endDate, bank, category, type, sortBy, sortOrder]);
-  useEffect(() => { getBanks().then(({ data }) => setBanks(data.banks)).catch(() => {}); }, []);
+  useEffect(() => { load(1); }, [search, startDate, endDate, bank, accountHolder, category, type, sortBy, sortOrder]);
+  useEffect(() => {
+    getBanks().then(({ data }) => setBanks(data.banks)).catch(() => {});
+    getAccountHolders().then(({ data }) => setAccountHolders(data.accountHolders)).catch(() => {});
+  }, []);
 
   const handleSort = (col) => {
     if (sortBy === col) setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -293,6 +299,10 @@ export default function MainTable() {
           <option value="all">All Banks</option>
           {banks.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
+        <select className="input" value={accountHolder} onChange={(e) => setAccountHolder(e.target.value)} style={{ maxWidth: 180 }}>
+          <option value="all">All Accounts</option>
+          {accountHolders.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
         <select className="input" value={category} onChange={(e) => setCategory(e.target.value)} style={{ maxWidth: 160 }}>
           <option value="all">All Categories</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -302,8 +312,8 @@ export default function MainTable() {
           <option value="debit">Debit</option>
           <option value="credit">Credit</option>
         </select>
-        {(search || startDate || endDate || bank !== 'all' || category !== 'all' || type !== 'all') && (
-          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setStartDate(''); setEndDate(''); setBank('all'); setCategory('all'); setType('all'); }}>
+        {(search || startDate || endDate || bank !== 'all' || accountHolder !== 'all' || category !== 'all' || type !== 'all') && (
+          <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setStartDate(''); setEndDate(''); setBank('all'); setAccountHolder('all'); setCategory('all'); setType('all'); }}>
             <X size={13} /> Clear
           </button>
         )}
